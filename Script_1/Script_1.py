@@ -25,7 +25,14 @@ def run(context):
             ui.messageBox(f'Material: {material}')
 
         # --- Get CAM Estimated Times ---
-        cam_product = adsk.cam.CAM.cast(app.activeProduct)
+        # Access the CAM product from the active document. This works even if
+        # the Design workspace is active because `activeProduct` will then be a
+        # `Design` instance. Using `itemByProductType` ensures we can obtain the
+        # CAM product regardless of the currently active workspace.
+        cam_product = app.activeDocument.products.itemByProductType(
+            adsk.cam.CAM.classType())
+        cam_product = adsk.cam.CAM.cast(cam_product)
+
         if not cam_product:
             ui.messageBox("No CAM product found.")
             return
