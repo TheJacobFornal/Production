@@ -29,9 +29,16 @@ def run(context):
         # the Design workspace is active because `activeProduct` will then be a
         # `Design` instance. Using `itemByProductType` ensures we can obtain the
         # CAM product regardless of the currently active workspace.
-        cam_product = app.activeDocument.products.itemByProductType(
-            adsk.cam.CAM.classType())
-        cam_product = adsk.cam.CAM.cast(cam_product)
+        # Try to obtain the CAM product if it exists. ``itemByProductType``
+        # raises a ``RuntimeError`` when the product isn't present, so use a
+        # ``try/except`` block to handle documents without manufacturing data.
+        cam_product = None
+        try:
+            cam_product = adsk.cam.CAM.cast(
+                app.activeDocument.products.itemByProductType(
+                    adsk.cam.CAM.classType()))
+        except:  # noqa: E722 - Fusion API throws generic RuntimeError
+            cam_product = None
 
         if not cam_product:
             ui.messageBox("No CAM product found.")
