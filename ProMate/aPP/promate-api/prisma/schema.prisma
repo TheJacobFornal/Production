@@ -1,0 +1,326 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model Location {
+  id      Int     @id @default(autoincrement())
+  name    String  @db.NVarChar(100)
+  place   String? @db.NVarChar(100)
+  barcode String? @db.NVarChar(100)
+
+  phases Phase[]
+  parts  Part[]
+
+  @@map("location")
+}
+
+model Position {
+  id   Int    @id @default(autoincrement())
+  name String @db.NVarChar(100)
+
+  users               User[]
+  positionPermissions PositionPermission[]
+
+  @@map("position")
+}
+
+model Permission {
+  id   Int    @id @default(autoincrement())
+  name String @db.NVarChar(100)
+
+  positionPermissions PositionPermission[]
+
+  @@map("permission")
+}
+
+model Phase {
+  id          Int     @id @default(autoincrement())
+  name        String  @db.NVarChar(100)
+  location_id Int?
+  type        String? @db.NVarChar(50)
+  description String? @db.NVarChar(255)
+
+  location      Location?      @relation(fields: [location_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  orders        Order[]
+  parts         Part[]
+  commercials   Commercial[]
+  operationLogs OperationLog[]
+
+  @@map("phase")
+}
+
+model Material {
+  id      Int      @id @default(autoincrement())
+  name    String   @db.NVarChar(255)
+  cost    Decimal? @db.Decimal(10, 2)
+  unit    String?  @db.NVarChar(20)
+  density Decimal? @db.Decimal(10, 4)
+  barcode String?  @db.NVarChar(100)
+
+  formLogsEst  FormLog[] @relation("materialEst")
+  formLogsReal FormLog[] @relation("materialReal")
+
+  @@map("material")
+}
+
+model Cooperation {
+  id      Int      @id @default(autoincrement())
+  name    String   @db.NVarChar(255)
+  cost    Decimal? @db.Decimal(10, 2)
+  unit    String?  @db.NVarChar(20)
+  barcode String?  @db.NVarChar(100)
+
+  operationTimeLogs OperationTimeLog[]
+
+  @@map("cooperation")
+}
+
+model Operation {
+  id                Int      @id @default(autoincrement())
+  name              String   @db.NVarChar(100)
+  hour_cost         Decimal? @db.Decimal(10, 2)
+  number_of_workers Int      @default(1)
+  barcode           String?  @db.NVarChar(100)
+
+  userOperations UserOperation[]
+  operationLogs  OperationLog[]
+
+  @@map("operation")
+}
+
+model Machine {
+  id   Int     @id @default(autoincrement())
+  name String  @db.NVarChar(100)
+  type String? @db.NVarChar(50)
+
+  machineAssignments MachineAssignment[]
+  operationTimeLogs  OperationTimeLog[]
+
+  @@map("machine")
+}
+
+model User {
+  id            Int      @id @default(autoincrement())
+  name          String   @db.NVarChar(100)
+  surname       String   @db.NVarChar(100)
+  email         String?  @db.NVarChar(255)
+  password_hash String?  @db.NVarChar(255)
+  position_id   Int?
+  barcode       String?  @db.NVarChar(100)
+  is_active     Boolean  @default(true)
+  rfid_uid      String?  @db.NVarChar(50)
+  created_at    DateTime @default(now())
+
+  position           Position?          @relation(fields: [position_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  machineAssignments MachineAssignment[]
+  userOperations     UserOperation[]
+  operationTimeLogs  OperationTimeLog[]
+
+  @@map("user")
+}
+
+model PositionPermission {
+  id            Int @id @default(autoincrement())
+  position_id   Int
+  permission_id Int
+
+  position   Position   @relation(fields: [position_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  permission Permission @relation(fields: [permission_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("position_permission")
+}
+
+model MachineAssignment {
+  id            Int       @id @default(autoincrement())
+  user_id       Int
+  machine_id    Int
+  assigned_at   DateTime  @default(now())
+  unassigned_at DateTime?
+
+  user    User    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  machine Machine @relation(fields: [machine_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("machine_assignment")
+}
+
+model UserOperation {
+  id           Int @id @default(autoincrement())
+  user_id      Int
+  operation_id Int
+
+  user      User      @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  operation Operation @relation(fields: [operation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("user_operation")
+}
+
+model Order {
+  id           Int       @id @default(autoincrement())
+  order_number String    @db.NVarChar(100)
+  MOS_number   String?   @db.NVarChar(100)
+  created_at   DateTime  @default(now())
+  closed_at    DateTime?
+  folder_path  String?   @db.NVarChar(500)
+  all_drawings Boolean   @default(false)
+  barcode      String?   @db.NVarChar(100)
+  phase_id     Int?
+
+  phase Phase? @relation(fields: [phase_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  parts Part[]
+
+  @@map("order")
+}
+
+model Part {
+  id                    Int       @id @default(autoincrement())
+  order_id              Int
+  symbol                String?   @db.NVarChar(50)
+  part_number           String    @db.NVarChar(50)
+  name                  String    @db.NVarChar(255)
+  quantity_right        Int       @default(0)
+  quantity_left         Int       @default(0)
+  deadline_at           DateTime?
+  paths_id              Int?
+  price_id              Int?
+  phase_id              Int?
+  rework_parent_part_id Int?
+  location_id           Int?
+  card_printed          Boolean   @default(false)
+  sticker_printed       Boolean   @default(false)
+  sticker_printed_at    DateTime?
+  barcode               String?   @db.NVarChar(100)
+  finished_at           DateTime?
+
+  order          Order     @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  phase          Phase?    @relation(fields: [phase_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  location       Location? @relation(fields: [location_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reworkParent   Part?     @relation("PartRework", fields: [rework_parent_part_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reworkChildren Part[]    @relation("PartRework")
+
+  activePaths Paths?  @relation("PartActivePaths", fields: [paths_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paths       Paths[] @relation("PathsOfPart")
+
+  activePrice Price?  @relation("PartActivePrice", fields: [price_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  prices      Price[] @relation("PricesOfPart")
+
+  formLogs      FormLog[]
+  operationLogs OperationLog[]
+
+  @@map("part")
+}
+
+model Paths {
+  id           Int     @id @default(autoincrement())
+  part_id      Int
+  PDF_path     String? @db.NVarChar(500)
+  DWG_path     String? @db.NVarChar(500)
+  STP_path     String? @db.NVarChar(500)
+  CAM_path     String? @db.NVarChar(500)
+  card_path    String? @db.NVarChar(500)
+  all_drawings Boolean @default(false)
+
+  part          Part   @relation("PathsOfPart", fields: [part_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  activeInParts Part[] @relation("PartActivePaths")
+
+  @@map("paths")
+}
+
+model Price {
+  id                   Int     @id @default(autoincrement())
+  part_id              Int
+  cost_commercial_part Decimal @default(0) @db.Decimal(10, 2)
+  cost_labor_hour      Decimal @default(0) @db.Decimal(10, 2)
+  cost_cooperation     Decimal @default(0) @db.Decimal(10, 2)
+  cost_machining       Decimal @default(0) @db.Decimal(10, 2)
+  price_kit            Decimal @default(0) @db.Decimal(10, 2)
+  price_piece          Decimal @default(0) @db.Decimal(10, 2)
+
+  part          Part   @relation("PricesOfPart", fields: [part_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  activeInParts Part[] @relation("PartActivePrice")
+
+  @@map("price")
+}
+
+model FormLog {
+  id              Int      @id @default(autoincrement())
+  part_id         Int
+  commercial_id   Int?
+  dim_a_est       Decimal? @db.Decimal(10, 2)
+  dim_b_est       Decimal? @db.Decimal(10, 2)
+  dim_c_est       Decimal? @db.Decimal(10, 2)
+  material_est_id Int?
+  dim_a_real      Decimal? @db.Decimal(10, 2)
+  dim_b_real      Decimal? @db.Decimal(10, 2)
+  dim_c_real      Decimal? @db.Decimal(10, 2)
+  area_one        Decimal? @db.Decimal(10, 4)
+  weight_one      Decimal? @db.Decimal(10, 4)
+  weight_real_set Boolean  @default(false)
+  material_id     Int?
+  cost_kit        Decimal? @db.Decimal(10, 2)
+
+  part             Part        @relation(fields: [part_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  materialEst      Material?   @relation("materialEst", fields: [material_est_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  material         Material?   @relation("materialReal", fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  activeCommercial Commercial? @relation("FormLogActiveCommercial", fields: [commercial_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  commercials Commercial[] @relation("FormLogCommercials")
+
+  @@map("form_log")
+}
+
+model Commercial {
+  id         Int       @id @default(autoincrement())
+  form_id    Int
+  cost       Decimal?  @db.Decimal(10, 2)
+  ordered_at DateTime?
+  arrived_at DateTime?
+  phase_id   Int?
+
+  formLog          FormLog   @relation("FormLogCommercials", fields: [form_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  phase            Phase?    @relation(fields: [phase_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  activeInFormLogs FormLog[] @relation("FormLogActiveCommercial")
+
+  @@map("commercial")
+}
+
+model OperationLog {
+  id              Int      @id @default(autoincrement())
+  part_id         Int
+  operation_id    Int
+  phase_id        Int?
+  time_estimated  Decimal? @db.Decimal(10, 2)
+  time_real       Decimal? @db.Decimal(10, 2)
+  operation_order Int      @default(0)
+  barcode         String?  @db.NVarChar(100)
+  cost            Decimal? @db.Decimal(10, 2)
+
+  part              Part               @relation(fields: [part_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  operation         Operation          @relation(fields: [operation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  phase             Phase?             @relation(fields: [phase_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  operationTimeLogs OperationTimeLog[]
+
+  @@map("operation_logs")
+}
+
+model OperationTimeLog {
+  id             Int       @id @default(autoincrement())
+  operation_id   Int?
+  cooperation_id Int?
+  start_date     DateTime?
+  finish_date    DateTime?
+  user_id        Int?
+  machine_id     Int?
+  barcode        String?   @db.NVarChar(100)
+
+  operationLog OperationLog? @relation(fields: [operation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cooperation  Cooperation?  @relation(fields: [cooperation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user         User?         @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  machine      Machine?      @relation(fields: [machine_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("operation_time_logs")
+}

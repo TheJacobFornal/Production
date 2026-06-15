@@ -1,0 +1,135 @@
+export const mockPhases = [
+  // ─── Fazy zamówień ────────────────────────────────────────────────────────
+  { id: 1, name: 'Z1', type: 'order', location_id: null, description: 'Nowe zamówienie z SoftLab' },
+  { id: 2, name: 'Z2', type: 'order', location_id: null, description: 'Założono folder i przekopiowano rysunki' },
+  { id: 3, name: 'Z3', type: 'order', location_id: null, description: 'Skończone przez technologów' },
+  { id: 4, name: 'Z4', type: 'order', location_id: null, description: 'Gotowe do produkcji' },
+  { id: 5, name: 'Z5', type: 'order', location_id: null, description: 'Zaczęto produkcję' },
+  { id: 6, name: 'Z6', type: 'order', location_id: null, description: 'Skończono produkcję' },
+  { id: 7, name: 'Z7', type: 'order', location_id: null, description: 'Komplet danych poprodukcyjnych' },
+  { id: 8, name: 'Z8', type: 'order', location_id: null, description: 'Wpisano dane do SoftLab' },
+
+  // ─── Fazy detali ──────────────────────────────────────────────────────────
+  { id:  9, name: 'D1', type: 'part', location_id: null, description: 'Nowy Detal' },
+  { id: 10, name: 'D2', type: 'part', location_id: null, description: 'Gotowy dla Technologów' },
+  { id: 11, name: 'D3', type: 'part', location_id: null, description: 'Przypisane czasy operacji, wymiary i kooperacje' },
+  { id: 12, name: 'D4', type: 'part', location_id: null, description: 'Dopisanie do karty detali (ilość, numer zlecenia, termin realizacji)' },
+  { id: 13, name: 'D5', type: 'part', location_id: null, description: 'Wydrukowanie Karty Detalu' },
+  { id: 14, name: 'D6', type: 'part', location_id: null, description: 'Gotowe do Produkcji' },
+  { id: 15, name: 'D7', type: 'part', location_id: null, description: 'W trakcie produkcji' },
+  { id: 21, name: 'D8', type: 'part', location_id: null, description: 'Detal skończony' },
+  { id: 22, name: 'D9', type: 'part', location_id: null, description: 'Komplet danych poprodukcyjnych' },
+
+  // ─── Fazy operacji ────────────────────────────────────────────────────────
+  { id: 16, name: 'Oczekuje',     type: 'operation', location_id: null, description: 'Operacja nie zaczęta' },
+  { id: 17, name: 'W realizacji', type: 'operation', location_id: null, description: 'Operacja w trakcie' },
+  { id: 18, name: 'Wykonana',     type: 'operation', location_id: null, description: 'Operacja zakończona' },
+]
+
+export const mockLocations = [
+  { id: 1, name: 'Hala A',                   place: 'Sekcja CNC',    barcode: 'LOC001' },
+  { id: 2, name: 'Magazyn',                  place: 'Budynek B',     barcode: 'LOC002' },
+  { id: 3, name: 'Kooperacja zewnętrzna',    place: null,            barcode: null },
+]
+
+export const mockMachines = [
+  { id: 1, name: 'CNC Okuma LB3000',      type: 'Tokarka CNC' },
+  { id: 2, name: 'Frezarka DMG Mori',     type: 'Frezarka CNC' },
+  { id: 3, name: 'Szlifierka cylindryczna', type: 'Szlifierka' },
+]
+
+export const mockOperations = [
+  { id:  1, name: 'PLOTER',    hour_cost: 150, number_of_workers: 1, barcode: null },
+  { id:  2, name: 'FKG',       hour_cost: 120, number_of_workers: 1, barcode: null },
+  { id:  3, name: 'FKO',       hour_cost: 120, number_of_workers: 1, barcode: null },
+  { id:  4, name: 'TOK',       hour_cost: 120, number_of_workers: 1, barcode: null },
+  { id:  5, name: 'TOKCNC',    hour_cost: 180, number_of_workers: 1, barcode: null },
+  { id:  6, name: 'FCNC',      hour_cost: 180, number_of_workers: 4, barcode: null },
+  { id:  7, name: 'FCNC_ROBO', hour_cost: 180, number_of_workers: 1, barcode: null },
+  { id:  8, name: 'PIŁA',      hour_cost: 100, number_of_workers: 1, barcode: null },
+  { id:  9, name: 'ŚLUSARNIA', hour_cost: 100, number_of_workers: 1, barcode: null },
+  { id: 10, name: 'SZLIF',     hour_cost: 120, number_of_workers: 1, barcode: null },
+  { id: 11, name: 'SPAW',      hour_cost: 100, number_of_workers: 1, barcode: null },
+]
+
+export const mockCooperations = [
+  { id:  1, name: 'Czernić',          price: 15,  unit: 'kg'  },
+  { id:  2, name: 'Czernić TŚ',       price: 15,  unit: 'kg'  },
+  { id:  3, name: 'Czernić MS',       price:  9,  unit: 'kg'  },
+  { id:  4, name: 'Czernić na zimno', price:  5,  unit: 'kg'  },
+  { id:  5, name: 'Hartować',         price: 10,  unit: 'kg'  },
+  { id:  6, name: 'Cynkować',         price:  3,  unit: 'dm2' },
+  { id:  7, name: 'Anodować',         price:  3,  unit: 'dm2' },
+  { id:  8, name: 'Drut',             price: 50,  unit: 'szt' },
+  { id:  9, name: 'Chrom',            price: 200, unit: 'szt' },
+  { id: 10, name: 'Chromian',         price: 12,  unit: 'dm2' },
+  { id: 11, name: 'Azotować',         price: 100, unit: 'szt' },
+  { id: 12, name: 'Frezowanie',       price: 100, unit: 'szt' },
+  { id: 13, name: 'KTL',              price: 50,  unit: 'szt' },
+  { id: 14, name: 'Proszek',          price: 50,  unit: 'kg'  },
+  { id: 15, name: 'Wolframować',      price: 50,  unit: 'szt' },
+  { id: 16, name: 'Szlifować',        price: 50,  unit: null  },
+  { id: 17, name: 'Polerować',        price: 50,  unit: null  },
+  { id: 18, name: 'Malować na mokro', price: 50,  unit: null  },
+  { id: 19, name: 'Spawać',           price: 50,  unit: null  },
+]
+
+export const mockOperationLogs: never[] = []
+
+export const mockCooperationLogs: never[] = []
+
+export const mockMaterials = [
+  { id:  1, name: 'S355',            density:  8,    cost:   9,     unit: 'kg' },
+  { id:  2, name: 'ST37',            density:  8,    cost:   7,     unit: 'kg' },
+  { id:  3, name: '1.2311',          density:  8,    cost:  13.5,   unit: 'kg' },
+  { id:  4, name: 'C75S',            density: null,  cost:  null,   unit: 'kg' },
+  { id:  5, name: 'Sp400',           density:  8,    cost:  18.5,   unit: 'kg' },
+  { id:  6, name: '40H',             density:  8,    cost:   9.9,   unit: 'kg' },
+  { id:  7, name: 'C45',             density:  8,    cost:   8.5,   unit: 'kg' },
+  { id:  8, name: 'nc11lv',          density:  8,    cost:  24.9,   unit: 'kg' },
+  { id:  9, name: 'NC6',             density:  8,    cost:  14.5,   unit: 'kg' },
+  { id: 10, name: '1.2316',          density:  8,    cost:  28.5,   unit: 'kg' },
+  { id: 11, name: 'toolox33',        density:  8,    cost:  10,     unit: 'kg' },
+  { id: 12, name: 'toolox44',        density:  8,    cost:  22.5,   unit: 'kg' },
+  { id: 13, name: 'hardox400',       density:  8,    cost:  11,     unit: 'kg' },
+  { id: 14, name: 'ina6',            density:  8,    cost:   8,     unit: 'kg' },
+  { id: 15, name: 'ina10',           density:  8,    cost:   8,     unit: 'kg' },
+  { id: 16, name: 'ina12',           density:  8,    cost:   8,     unit: 'kg' },
+  { id: 17, name: 'ina16',           density:  8,    cost:   7.88,  unit: 'kg' },
+  { id: 18, name: 'ina20',           density:  8,    cost:   7.88,  unit: 'kg' },
+  { id: 19, name: 'ina25',           density:  8,    cost:   7.88,  unit: 'kg' },
+  { id: 20, name: 'ina30',           density:  8,    cost:  null,   unit: 'kg' },
+  { id: 21, name: '304',             density:  8,    cost:  22,     unit: 'kg' },
+  { id: 22, name: '1',               density:  8,    cost:   0,     unit: 'kg' },
+  { id: 23, name: '303',             density:  8,    cost:  24,     unit: 'kg' },
+  { id: 24, name: '4H13',            density:  8,    cost:  25.5,   unit: 'kg' },
+  { id: 25, name: '316L',            density:  8,    cost:  32,     unit: 'kg' },
+  { id: 26, name: 'poliwęglan #4',   density:  1.2,  cost:  19,     unit: 'kg' },
+  { id: 27, name: 'POM-C biały',     density:  1.6,  cost:  43.5,   unit: 'kg' },
+  { id: 28, name: 'pom-c',           density:  1.6,  cost:  43.5,   unit: 'kg' },
+  { id: 29, name: 'poliamid',        density:  1,    cost:  24,     unit: 'kg' },
+  { id: 30, name: 'PE1000',          density:  1,    cost:  25,     unit: 'kg' },
+  { id: 31, name: 'corroplast',      density:  8,    cost:  19,     unit: 'kg' },
+  { id: 32, name: '1.2085',          density:  8,    cost:  18,     unit: 'kg' },
+  { id: 33, name: 'PTFE',            density:  2.2,  cost:  72,     unit: 'kg' },
+  { id: 34, name: 'PEEK',            density:  1.3,  cost: 600,     unit: 'kg' },
+  { id: 35, name: 'C250-4',          density:  2.66, cost:  56.24,  unit: 'kg' },
+  { id: 36, name: 'C250-5',          density:  2.66, cost:  35.95,  unit: 'kg' },
+  { id: 37, name: 'C250-6',          density:  2.66, cost:  32.69,  unit: 'kg' },
+  { id: 38, name: 'C250-8',          density:  2.66, cost:  29.14,  unit: 'kg' },
+  { id: 39, name: 'C250-10',         density:  2.66, cost:  28.29,  unit: 'kg' },
+  { id: 40, name: 'C250-12',         density:  2.66, cost:  25.29,  unit: 'kg' },
+  { id: 41, name: 'C250-15',         density:  2.66, cost:  23.93,  unit: 'kg' },
+  { id: 42, name: 'C250-18',         density:  2.66, cost:  23.93,  unit: 'kg' },
+  { id: 43, name: 'C250-20',         density:  2.66, cost:  18.18,  unit: 'kg' },
+  { id: 44, name: 'C250-25',         density:  2.66, cost:  21.94,  unit: 'kg' },
+  { id: 45, name: 'C250-30',         density:  2.66, cost:  17.7,   unit: 'kg' },
+  { id: 46, name: 'C250-35',         density:  2.66, cost:  21.94,  unit: 'kg' },
+  { id: 47, name: 'C250-40',         density:  2.66, cost:  21.94,  unit: 'kg' },
+  { id: 48, name: 'C250-50',         density:  2.66, cost:  21.94,  unit: 'kg' },
+  { id: 49, name: 'C330',            density:  2.76, cost:  37.8,   unit: 'kg' },
+  { id: 50, name: 'BA101(CuSn10P)',  density:  8.9,  cost: 105,     unit: 'kg' },
+  { id: 51, name: 'C250-60',         density:  2.66, cost:  21.94,  unit: 'kg' },
+  { id: 52, name: 'PA6',             density:  2.79, cost:  37.8,   unit: 'kg' },
+  { id: 53, name: 'PA9',             density:  2.79, cost:  50,     unit: 'kg' },
+]
