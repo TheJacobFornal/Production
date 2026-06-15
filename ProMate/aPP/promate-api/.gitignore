@@ -1,0 +1,14 @@
+node_modules/
+dist/
+
+# Pliki środowiskowe — NIE commituj produkcyjnych sekretów
+.env
+.env.production
+.env.local
+
+# Można commitować (nie zawierają sekretów)
+# .env.test  ← OK do commitu (dane testowe Docker)
+
+# Logi
+*.log
+npm-debug.log*
