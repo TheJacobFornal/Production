@@ -10,6 +10,7 @@ export interface OperationLog {
   operation_order: number | null
   barcode:         string | null
   cost:            number | null
+  notes:           string | null
 }
 
 class OperationLogsRepository {
@@ -89,6 +90,22 @@ class OperationLogsRepository {
         UPDATE operation_logs
         SET phase_id = @phaseId
         WHERE part_id = @partId AND operation_id = @operationId
+      `)
+  }
+
+  async updateNotes(partId: number, operationId: number, notes: string | null): Promise<void> {
+    const db = await getDb()
+    await db.request()
+      .input('partId',      sql.Int,           partId)
+      .input('operationId', sql.Int,           operationId)
+      .input('notes',       sql.NVarChar(1000), notes)
+      .query(`
+        IF EXISTS (SELECT 1 FROM operation_logs WHERE part_id = @partId AND operation_id = @operationId)
+          UPDATE operation_logs SET notes = @notes
+          WHERE part_id = @partId AND operation_id = @operationId
+        ELSE
+          INSERT INTO operation_logs (part_id, operation_id, notes)
+          VALUES (@partId, @operationId, @notes)
       `)
   }
 

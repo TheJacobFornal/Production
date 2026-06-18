@@ -1,5 +1,6 @@
 import express from 'express'
 import cors from 'cors'
+import path from 'path'
 import ordersRoutes from './routes/orders.routes'
 import operationLogsRoutes from './routes/operation-logs.routes'
 import formLogRoutes from './routes/form-log.routes'
@@ -35,6 +36,15 @@ export function createApp() {
       db: process.env.DB_NAME ?? 'unknown',
     })
   })
+
+  // Serwuj zbudowany frontend (tylko w trybie produkcyjnym)
+  if (process.env.NODE_ENV === 'production') {
+    const clientDist = path.join(__dirname, '../../promate-client/dist')
+    app.use(express.static(clientDist))
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(clientDist, 'index.html'))
+    })
+  }
 
   return app
 }

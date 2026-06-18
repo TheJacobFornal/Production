@@ -41,7 +41,8 @@ async function createSchema(pool) {
        folder_path  NVARCHAR(500) NULL,
        all_drawings BIT           NOT NULL DEFAULT 0,
        barcode      NVARCHAR(100) NULL,
-       phase_id     INT           NULL REFERENCES [phase](id)
+       phase_id     INT           NULL REFERENCES [phase](id),
+       NagId        NVARCHAR(50)  NULL
      )`,
 
     `IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='part' AND xtype='U')
@@ -63,7 +64,20 @@ async function createSchema(pool) {
        sticker_printed       BIT           NOT NULL DEFAULT 0,
        sticker_printed_at    DATETIME2     NULL,
        barcode               NVARCHAR(100) NULL,
-       finished_at           DATETIME2     NULL
+       finished_at           DATETIME2     NULL,
+       LinId                 INT           NULL
+     )`,
+
+    `IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='paths' AND xtype='U')
+     CREATE TABLE [paths] (
+       id          INT IDENTITY(1,1) PRIMARY KEY,
+       part_id     INT            NOT NULL REFERENCES [part](id),
+       PDF_path    NVARCHAR(500)  NULL,
+       DWG_path    NVARCHAR(500)  NULL,
+       STP_path    NVARCHAR(500)  NULL,
+       CAM_path    NVARCHAR(500)  NULL,
+       card_path   NVARCHAR(500)  NULL,
+       all_drawings BIT           NULL DEFAULT 0
      )`,
 
     `IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='material' AND xtype='U')
@@ -102,7 +116,8 @@ async function createSchema(pool) {
        time_real        DECIMAL(10,2)  NULL,
        operation_order  INT            NULL,
        barcode          NVARCHAR(100)  NULL,
-       cost             DECIMAL(10,2)  NULL
+       cost             DECIMAL(10,2)  NULL,
+       notes            NVARCHAR(1000) NULL
      )`,
 
     `IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='cooperation_log' AND xtype='U')

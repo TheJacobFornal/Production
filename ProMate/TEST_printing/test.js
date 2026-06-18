@@ -3,7 +3,7 @@ const { getPrinters, print } = require("pdf-to-printer");
 async function main() {
   const printers = await getPrinters();
 
-  const targetName = "KONICA MINOLTA bizhub 367 PS (10.1.69.90) UPD";
+  const targetName = "KONICA MINOLTA bizhub 224e KONSTRUKTORZY";
 
   const printer = printers.find((p) => p.name === targetName);
 

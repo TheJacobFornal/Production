@@ -1,0 +1,49 @@
+{
+  "hash": "acdafa20",
+  "configHash": "eafbabf4",
+  "lockfileHash": "5d748cdc",
+  "browserHash": "f89a7da9",
+  "optimized": {
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "d48ab0bf",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "be5ad236",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "0737f9db",
+      "needsInterop": true
+    },
+    "react-router-dom": {
+      "src": "../../node_modules/react-router-dom/dist/index.js",
+      "file": "react-router-dom.js",
+      "fileHash": "ebfac625",
+      "needsInterop": false
+    },
+    "jsbarcode": {
+      "src": "../../node_modules/jsbarcode/bin/JsBarcode.js",
+      "file": "jsbarcode.js",
+      "fileHash": "675cd5e7",
+      "needsInterop": true
+    }
+  },
+  "chunks": {
+    "chunk-HCGKX5ED": {
+      "file": "chunk-HCGKX5ED.js"
+    },
+    "chunk-WNPTCGAH": {
+      "file": "chunk-WNPTCGAH.js"
+    },
+    "chunk-5WRI5ZAA": {
+      "file": "chunk-5WRI5ZAA.js"
+    }
+  }
+}

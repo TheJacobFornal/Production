@@ -34,7 +34,7 @@ class PartsRepository {
         SELECT p.id, p.order_id, p.symbol, p.part_number, p.name,
                p.quantity_right, p.quantity_left, p.phase_id, p.location_id,
                p.card_printed, p.sticker_printed, p.barcode, p.finished_at,
-               p.rework_parent_part_id,
+               p.rework_parent_part_id, p.deadline_at,
                o.order_number
         FROM   [part]  p
         JOIN   [order] o ON o.id = p.order_id
@@ -69,6 +69,14 @@ class PartsRepository {
       .input('partId',  sql.Int, partId)
       .input('phaseId', sql.Int, phaseId)
       .query('UPDATE [part] SET phase_id = @phaseId WHERE id = @partId')
+  }
+
+  async getPdfPath(partId: number): Promise<string | null> {
+    const db = await getDb()
+    const result = await db.request()
+      .input('id', sql.Int, partId)
+      .query('SELECT PDF_path FROM [paths] WHERE part_id = @id')
+    return result.recordset[0]?.PDF_path ?? null
   }
 
   /** Ustawia rework_parent_part_id dla detalu */

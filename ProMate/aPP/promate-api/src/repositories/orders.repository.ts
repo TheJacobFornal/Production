@@ -20,7 +20,7 @@ export interface IOrderRepository {
   getAll(): Promise<Order[]>
   getAllSummary(): Promise<OrderListItem[]>
   getById(id: number): Promise<Order | null>
-  getParts(orderId: number): Promise<Part[]>
+  getParts(orderId: number, minPhase?: string): Promise<Part[]>
   getSummaryByOrderNumber(orderNumber: string): Promise<OrderSummary | null>
   readyForProduction(orderId: number): Promise<void>
 }
@@ -92,14 +92,15 @@ class OrderRepository implements IOrderRepository {
     return (result.recordset[0] ?? null) as OrderSummary | null
   }
 
-  /** Ustawia fazę zamówienia na Z3 (Skończone przez technologów) */
   async readyForProduction(orderId: number): Promise<void> {
     const db = await getDb()
     await db.request()
       .input('orderId', sql.Int, orderId)
       .query(`
-        DECLARE @z3Id INT = (SELECT id FROM phase WHERE name = 'Z3' AND type = 'order')
-        UPDATE [order] SET phase_id = @z3Id WHERE id = @orderId
+        DECLARE @z4Id INT = (SELECT id FROM phase WHERE name = 'Z4' AND type = 'order')
+        DECLARE @d4Id INT = (SELECT id FROM phase WHERE name = 'D4' AND type = 'part')
+        UPDATE [order] SET phase_id = @z4Id WHERE id = @orderId
+        UPDATE [part]  SET phase_id = @d4Id WHERE order_id = @orderId AND phase_id != (SELECT id FROM phase WHERE name = 'D6' AND type = 'part')
       `)
   }
 }

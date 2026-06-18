@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { orderRepository } from '../repositories/orders.repository'
+import { generateMergedPdfsForOrder, listPrinters } from '../services/card-pdf.service'
 
 const router = Router()
 
@@ -36,11 +37,23 @@ router.get('/:id/parts', async (req, res) => {
   res.json(parts)
 })
 
+// GET /api/orders/printers
+router.get('/printers', async (_req, res) => {
+  try {
+    const printers = await listPrinters()
+    res.json({ printers })
+  } catch (err) {
+    res.status(500).json({ message: String(err) })
+  }
+})
+
 // POST /api/orders/:id/ready-for-production
 router.post('/:id/ready-for-production', async (req, res) => {
   try {
-    await orderRepository.readyForProduction(Number(req.params.id))
-    res.json({ ok: true })
+    const orderId = Number(req.params.id)
+    const { errors } = await generateMergedPdfsForOrder(orderId)
+    await orderRepository.readyForProduction(orderId)
+    res.json({ ok: true, pdfErrors: errors.length > 0 ? errors : undefined })
   } catch (err) {
     console.error('ready-for-production error:', err)
     res.status(500).json({ message: 'Błąd serwera' })

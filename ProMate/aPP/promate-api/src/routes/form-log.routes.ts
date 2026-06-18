@@ -39,6 +39,20 @@ router.post('/real', async (req, res) => {
 })
 
 
+// PATCH /api/form-log/material-est — zapis materiału szacunkowego
+router.patch('/material-est', async (req, res) => {
+  try {
+    const { part_id, material_est_id } = req.body
+    if (!part_id) return res.status(400).json({ message: 'part_id wymagane' })
+    const val = material_est_id != null && material_est_id !== '' ? Number(material_est_id) : null
+    await formLogRepository.upsertMaterialEst(Number(part_id), val)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('form-log/material-est PATCH error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
 // PATCH /api/form-log/cost-kit — zapis ceny materiału kpl
 router.patch('/cost-kit', async (req, res) => {
   try {

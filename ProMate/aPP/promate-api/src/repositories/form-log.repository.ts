@@ -1,16 +1,17 @@
 import { getDb, sql } from '../config/database'
 
 export interface FormLogDims {
-  part_id:     number
-  dim_a_est:   number | null
-  dim_b_est:   number | null
-  dim_c_est:   number | null
-  dim_a_real:  number | null
-  dim_b_real:  number | null
-  dim_c_real:  number | null
-  material_id: number | null
-  weight_one:  number | null
-  area_one:    number | null
+  part_id:         number
+  dim_a_est:       number | null
+  dim_b_est:       number | null
+  dim_c_est:       number | null
+  dim_a_real:      number | null
+  dim_b_real:      number | null
+  dim_c_real:      number | null
+  material_id:     number | null
+  material_est_id: number | null
+  weight_one:      number | null
+  area_one:        number | null
 }
 
 class FormLogRepository {
@@ -91,6 +92,19 @@ class FormLogRepository {
       `)
   }
 
+  async upsertMaterialEst(partId: number, materialEstId: number | null): Promise<void> {
+    const db = await getDb()
+    await db.request()
+      .input('partId',        sql.Int, partId)
+      .input('materialEstId', sql.Int, materialEstId)
+      .query(`
+        IF EXISTS (SELECT 1 FROM form_log WHERE part_id = @partId)
+          UPDATE form_log SET material_est_id = @materialEstId WHERE part_id = @partId
+        ELSE
+          INSERT INTO form_log (part_id, material_est_id) VALUES (@partId, @materialEstId)
+      `)
+  }
+
   async updateCostKit(partId: number, costKit: number | null): Promise<void> {
     const db = await getDb()
     await db.request()
@@ -110,7 +124,7 @@ class FormLogRepository {
     const result = await db.request()
       .query(`
         SELECT part_id, dim_a_est, dim_b_est, dim_c_est,
-               dim_a_real, dim_b_real, dim_c_real, material_id, weight_one, area_one
+               dim_a_real, dim_b_real, dim_c_real, material_id, material_est_id, weight_one, area_one
         FROM form_log
         WHERE part_id IN (${partIds.join(',')})
       `)

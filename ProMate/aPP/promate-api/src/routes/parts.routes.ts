@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import fs from 'fs'
 import { partsRepository } from '../repositories/parts.repository'
 
 const router = Router()
@@ -24,6 +25,21 @@ router.get('/search', async (req, res) => {
     res.json(results)
   } catch (err) {
     console.error('parts search error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// GET /api/parts/:id/pdf — streams the PDF file from paths table
+router.get('/:id(\\d+)/pdf', async (req, res) => {
+  try {
+    const pdfPath = await partsRepository.getPdfPath(Number(req.params.id))
+    if (!pdfPath) return res.status(404).json({ message: 'Brak pliku PDF' })
+    if (!fs.existsSync(pdfPath)) return res.status(404).json({ message: 'Plik PDF nie istnieje' })
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', 'inline')
+    fs.createReadStream(pdfPath).pipe(res)
+  } catch (err) {
+    console.error('parts pdf error:', err)
     res.status(500).json({ message: 'Błąd serwera' })
   }
 })

@@ -1,55 +1,42 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import JsBarcode from 'jsbarcode'
 import {
   partsApi, PartWithOrder,
   operationLogsApi, OperationLog,
-  cooperationLogApi, CooperationLog,
   operationsApi, Operation,
+  formLogApi, FormLogDims,
+  materialsApi, Material,
+  cooperationLogApi, CooperationLog,
   cooperationsApi, Cooperation,
+  commercialApi,
 } from '../services/api'
 
-// ─── Barcode component ────────────────────────────────────────────────────────
+const BORDER = '1px solid #000'
+const TH: React.CSSProperties = { border: BORDER, padding: '2px 5px', fontWeight: 700, fontSize: 12, textAlign: 'center', verticalAlign: 'middle' }
+const TD: React.CSSProperties = { border: BORDER, padding: '2px 5px', fontSize: 12, verticalAlign: 'middle' }
 
-function Barcode({ value, height = 45, fontSize = 8 }: { value: string; height?: number; fontSize?: number }) {
-  const ref = useRef<SVGSVGElement>(null)
-  useEffect(() => {
-    if (ref.current && value) {
-      try {
-        JsBarcode(ref.current, value, {
-          format: 'CODE128',
-          width: 1.4,
-          height,
-          displayValue: true,
-          fontSize,
-          margin: 3,
-          background: 'transparent',
-        })
-      } catch { /* ignore invalid barcode values */ }
-    }
-  }, [value, height, fontSize])
-  return <svg ref={ref} style={{ maxWidth: '100%' }} />
+function fmt(d: string | null | undefined): string {
+  if (!d) return ''
+  const dt = new Date(d)
+  if (isNaN(dt.getTime())) return ''
+  return dt.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-// ─── Kolejność operacji ───────────────────────────────────────────────────────
-
-const OP_ORDER: Record<string, number> = {
-  PIŁA: 1, PLOTER: 2, FKG: 3, FKO: 3, TOK: 4, TOKCNC: 5,
-  FCNC: 6, FCNC_ROBO: 7, SZLIF: 8, ŚLUSARNIA: 9, SPAW: 10,
-}
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
+const TOTAL_OP_ROWS = 13
 
 export default function ProductionCardPage() {
   const { partId } = useParams<{ partId: string }>()
 
-  const [part,        setPart]        = useState<PartWithOrder | null>(null)
-  const [opLogs,      setOpLogs]      = useState<OperationLog[]>([])
-  const [coopLogs,    setCoopLogs]    = useState<CooperationLog[]>([])
-  const [operations,  setOperations]  = useState<Operation[]>([])
-  const [cooperations,setCooperations]= useState<Cooperation[]>([])
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState<string | null>(null)
+  const [part,         setPart]         = useState<PartWithOrder | null>(null)
+  const [opLogs,       setOpLogs]       = useState<OperationLog[]>([])
+  const [operations,   setOperations]   = useState<Operation[]>([])
+  const [formLog,      setFormLog]      = useState<FormLogDims | null>(null)
+  const [materials,    setMaterials]    = useState<Material[]>([])
+  const [coopLogs,     setCoopLogs]     = useState<CooperationLog[]>([])
+  const [cooperations, setCooperations] = useState<Cooperation[]>([])
+  const [isHandlowka,  setIsHandlowka]  = useState(false)
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState<string | null>(null)
 
   useEffect(() => {
     const id = Number(partId)
@@ -57,260 +44,240 @@ export default function ProductionCardPage() {
     Promise.all([
       partsApi.getById(id),
       operationLogsApi.getByPartIds([id]),
-      cooperationLogApi.getByPartIds([id]),
       operationsApi.getAll(),
+      formLogApi.getByPartIds([id]),
+      materialsApi.getAll(),
+      cooperationLogApi.getByPartIds([id]),
       cooperationsApi.getAll(),
+      commercialApi.getCheckedPartIds([id]),
     ])
-      .then(([p, ol, cl, ops, coops]) => {
+      .then(([p, ol, ops, fl, mats, cl, coops, commercial]) => {
         setPart(p)
         setOpLogs(ol)
-        setCoopLogs(cl)
         setOperations(ops)
+        setFormLog(fl[0] ?? null)
+        setMaterials(mats)
+        setCoopLogs(cl)
         setCooperations(coops)
+        setIsHandlowka((commercial as number[]).includes(id))
       })
       .catch(() => setError('Błąd ładowania danych'))
       .finally(() => setLoading(false))
   }, [partId])
 
-  if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Arial, sans-serif' }}>
-      Ładowanie...
-    </div>
-  )
-  if (error || !part) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Arial, sans-serif', color: '#dc2626' }}>
-      {error ?? 'Nie znaleziono detalu'}
-    </div>
-  )
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Arial' }}>Ładowanie...</div>
+  if (error || !part) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Arial', color: '#dc2626' }}>{error ?? 'Nie znaleziono detalu'}</div>
 
-  // Operacje z uzupełnionym czasem, posortowane
+  // Operacje posortowane wg zaplanowanej kolejności
   const activeOps = opLogs
     .filter(ol => (ol.time_estimated ?? 0) > 0)
     .map(ol => ({ log: ol, op: operations.find(o => o.id === ol.operation_id) }))
     .filter(x => x.op)
-    .sort((a, b) => {
-      const orderA = OP_ORDER[a.op!.name] ?? 99
-      const orderB = OP_ORDER[b.op!.name] ?? 99
-      return orderA - orderB
-    })
+    .sort((a, b) => (a.log.operation_order ?? 99) - (b.log.operation_order ?? 99))
 
-  // Kooperacje uzupełnione
-  const activeCoops = coopLogs
+  const materialName = formLog?.material_est_id
+    ? (materials.find(m => m.id === formLog.material_est_id)?.name ?? '')
+    : ''
+
+  const dimA = formLog?.dim_a_est != null ? String(formLog.dim_a_est) : ''
+  const dimB = formLog?.dim_b_est != null ? String(formLog.dim_b_est) : ''
+  const dimC = formLog?.dim_c_est != null ? String(formLog.dim_c_est) : ''
+
+  type DisplayRow =
+    | { kind: 'op';    entry: { log: OperationLog; op: Operation } }
+    | { kind: 'label'; name: string }
+    | { kind: 'empty' }
+
+  const coopNames = coopLogs
     .sort((a, b) => a.slot - b.slot)
-    .map(cl => ({ log: cl, coop: cooperations.find(c => c.id === cl.cooperation_id) }))
-    .filter(x => x.coop)
+    .map(cl => cooperations.find(c => c.id === cl.cooperation_id)?.name ?? '')
+    .filter(Boolean)
 
-  const barcodeVal = part.barcode ?? part.part_number
+  const opRows: DisplayRow[] = [
+    { kind: 'label', name: 'PIŁA' },
+    ...activeOps.map(e => ({ kind: 'op' as const, entry: e as { log: OperationLog; op: Operation } })),
+    { kind: 'label', name: 'ŚLUSARNIA' },
+  ]
+  const allRows: DisplayRow[] = []
+  opRows.forEach((row, i) => {
+    allRows.push(row)
+    if (i < opRows.length - 1) allRows.push({ kind: 'empty' })
+  })
+  if (coopNames.length > 0) {
+    allRows.push({ kind: 'empty' })
+    for (const name of coopNames) {
+      allRows.push({ kind: 'label', name })
+    }
+  }
+  while (allRows.length < TOTAL_OP_ROWS) allRows.push({ kind: 'empty' })
 
   return (
     <>
-      {/* ── Przycisk druku (ukryty przy druku) ─────────────────────── */}
-      <div className="no-print" style={{
-        position: 'fixed', top: 16, right: 16, zIndex: 100,
-        display: 'flex', gap: 8,
-      }}>
-        <button
-          onClick={() => window.print()}
-          style={{
-            padding: '8px 20px', background: '#1d4ed8', color: 'white',
-            border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
+      <div className="no-print" style={{ position: 'fixed', top: 16, right: 16, zIndex: 100, display: 'flex', gap: 8 }}>
+        <button onClick={() => window.print()} style={{ padding: '8px 20px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
           Drukuj
         </button>
-        <button
-          onClick={() => window.close()}
-          style={{
-            padding: '8px 14px', background: '#6b7280', color: 'white',
-            border: 'none', borderRadius: 6, fontSize: 14,
-            cursor: 'pointer',
-          }}
-        >
+        <button onClick={() => window.close()} style={{ padding: '8px 14px', background: '#6b7280', color: 'white', border: 'none', borderRadius: 6, fontSize: 14, cursor: 'pointer' }}>
           ✕
         </button>
       </div>
 
-      {/* ── Karta ──────────────────────────────────────────────────── */}
-      <div style={{
-        fontFamily: 'Arial, Helvetica, sans-serif',
-        fontSize: 11,
-        padding: '20px 24px',
-        maxWidth: 740,
-        margin: '0 auto',
-        color: '#111',
-        background: '#fff',
-      }}>
+      <div style={{ fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 12, padding: '15px', maxWidth: 960, margin: '0 auto', color: '#000', background: '#fff' }}>
 
-        {/* Nagłówek */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-          <div style={{ fontSize: 24, fontWeight: 900, letterSpacing: -0.5, color: '#111' }}>
-            KARTA PRODUKCYJNA
-          </div>
-          <img src="/Logo_mini.png" alt="ProMate" style={{ height: 40, objectFit: 'contain' }} />
+        <div style={{ textAlign: 'center', fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
+          KARTA WYROBU DETALU
         </div>
 
-        <hr style={{ borderTop: '2px solid #111', margin: '0 0 14px' }} />
+        {/* Numer zamówienia / Termin realizacji */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <colgroup>
+            <col style={{ width: '18%' }} /><col style={{ width: '52%' }} />
+            <col style={{ width: '14%' }} /><col style={{ width: '16%' }} />
+          </colgroup>
+          <tbody>
+            <tr style={{ height: 27 }}>
+              <td style={TH}>Numer zamówienia</td>
+              <td style={TD}>{part.order_number}</td>
+              <td style={TH}>Termin realizacji</td>
+              <td style={TD}>{fmt(part.deadline_at)}</td>
+            </tr>
+          </tbody>
+        </table>
 
-        {/* Info + barcode */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
-          <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
-            <tbody>
-              {[
-                ['Nr zlecenia:', part.order_number],
-                ['Nr detalu:',   part.part_number],
-                ['Nazwa:',       part.name],
-                ['Ilość:',       String(part.quantity_right)],
-              ].map(([label, val]) => (
-                <tr key={label}>
-                  <td style={{ paddingRight: 10, paddingBottom: 3, color: '#444', whiteSpace: 'nowrap' }}>{label}</td>
-                  <td style={{ fontWeight: 700, paddingBottom: 3 }}>{val}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div style={{ textAlign: 'right' }}>
-            <Barcode value={barcodeVal} height={55} fontSize={9} />
-          </div>
-        </div>
+        {/* Przygotówka */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', marginTop: -1 }}>
+          <colgroup>
+            <col style={{ width: '18%' }} /><col style={{ width: '13%' }} />
+            <col style={{ width: '13%' }} /><col style={{ width: '13%' }} />
+            <col style={{ width: '13%' }} /><col style={{ width: '30%' }} />
+          </colgroup>
+          <tbody>
+            <tr>
+              <td colSpan={6} style={{ ...TH, paddingTop: 5, paddingBottom: 5 }}>Przygotówka</td>
+            </tr>
+            <tr>
+              <td rowSpan={2} style={{ ...TH, verticalAlign: 'middle' }}>Gatunek materiału</td>
+              <td colSpan={4} style={TH}>Formatka</td>
+              <td rowSpan={2} style={{ ...TH, verticalAlign: 'middle' }}>Data</td>
+            </tr>
+            <tr>
+              <td style={TH}>Wysokość</td>
+              <td style={TH}>Szerokość</td>
+              <td style={TH}>Długość</td>
+              <td style={TH}>Handlówka</td>
+            </tr>
+            <tr style={{ height: 30 }}>
+              <td style={TD}>{materialName}</td>
+              <td style={{ ...TD, textAlign: 'center' }}>{dimA}</td>
+              <td style={{ ...TD, textAlign: 'center' }}>{dimB}</td>
+              <td style={{ ...TD, textAlign: 'center' }}>{dimC}</td>
+              <td style={{ ...TD, textAlign: 'center', fontWeight: isHandlowka ? 700 : 400 }}>{isHandlowka ? 'TAK' : 'NIE'}</td>
+              <td style={TD}></td>
+            </tr>
+          </tbody>
+        </table>
 
-        {/* Etapy produkcji */}
-        {activeOps.length > 0 && (
-          <Section title="ETAPY PRODUKCJI:" badge="Skończone">
-            {activeOps.map(({ op }, i) => (
-              <OperationRow
-                key={op!.id}
-                index={i + 1}
-                label={op!.name}
-                barcodeVal={barcodeVal}
-              />
+        {/* Obróbka + Kontrola jakości */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', marginTop: -1 }}>
+          <colgroup>
+            <col style={{ width: '15%' }} /><col style={{ width: '26%' }} /><col style={{ width: '19%' }} />
+            <col style={{ width: '8%' }} /><col style={{ width: '8%' }} />
+            <col style={{ width: '8%' }} /><col style={{ width: '16%' }} />
+          </colgroup>
+          <tbody>
+            <tr>
+              <td colSpan={7} style={{ ...TH, paddingTop: 2, paddingBottom: 2 }}>Obróbka</td>
+            </tr>
+            <tr>
+              <td style={TH}>Operacja</td>
+              <td style={TH}>Uwagi</td>
+              <td style={TH}>Data</td>
+              <td style={TH}>Ilość</td>
+              <td style={TH}>Czas</td>
+              <td style={TH}>Kontrola</td>
+              <td style={TH}>Podpis</td>
+            </tr>
+            {allRows.map((row, i) => (
+              <tr key={i} style={{ height: 26 }}>
+                <td style={{ ...TD, fontWeight: row.kind !== 'empty' ? 700 : 400 }}>
+                  {row.kind === 'op' ? row.entry.op.name : row.kind === 'label' ? row.name : ''}
+                </td>
+                <td style={{ ...TD, padding: 0 }}>
+                  {row.kind !== 'empty' && (
+                    <NotesCell
+                      initialValue={row.kind === 'op' ? (row.entry.log.notes ?? '') : ''}
+                      onSave={row.kind === 'op'
+                        ? val => operationLogsApi.saveNotes(row.entry.log.part_id, row.entry.log.operation_id, val || null).catch(console.error)
+                        : () => {}}
+                    />
+                  )}
+                </td>
+                <td style={TD}></td>
+                <td style={{ ...TD, textAlign: 'center' }}>{row.kind !== 'empty' ? part.quantity_right : ''}</td>
+                <td style={TD}></td>
+                <td style={{ ...TD, textAlign: 'center' }}><Checkbox /></td>
+                <td style={TD}></td>
+              </tr>
             ))}
-          </Section>
-        )}
-
-        {/* Etapy kooperacji */}
-        {activeCoops.length > 0 && (
-          <Section title="ETAPY KOOPERACJI:" badge="Pojechało">
-            {activeCoops.map(({ coop }, i) => (
-              <OperationRow
-                key={coop!.id}
-                index={`K${i + 1}`}
-                label={coop!.name}
-                barcodeVal={barcodeVal}
-              />
-            ))}
-          </Section>
-        )}
+            <tr>
+              <td colSpan={7} style={{ ...TH, paddingTop: 2, paddingBottom: 2 }}>Kontrola jakości</td>
+            </tr>
+            <tr style={{ height: 21 }}>
+              <td colSpan={2} style={TH}>Podpis</td>
+              <td colSpan={2} style={TH}>Data</td>
+              <td style={TH}>OK</td>
+              <td colSpan={2} style={TH}>NOK</td>
+            </tr>
+            <tr style={{ height: 29 }}>
+              <td colSpan={2} style={TD}></td>
+              <td colSpan={2} style={TD}></td>
+              <td style={{ ...TD, textAlign: 'center' }}><Checkbox /></td>
+              <td colSpan={2} style={{ ...TD, textAlign: 'center' }}><Checkbox /></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <style>{`
         @media print {
           .no-print { display: none !important; }
           body { margin: 0; }
-          @page { size: A4; margin: 12mm 10mm; }
+          @page { size: A4 portrait; margin: 15px; }
         }
       `}</style>
     </>
   )
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function Section({ title, badge, children }: { title: string; badge: string; children: React.ReactNode }) {
+function Checkbox() {
   return (
-    <div style={{ marginBottom: 20 }}>
-      {/* Nagłówek sekcji */}
-      <div style={{
-        background: '#d1d5db',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '5px 10px',
-        fontWeight: 700, fontSize: 11, letterSpacing: 0.3,
-        border: '1px solid #9ca3af',
-      }}>
-        <span>{title}</span>
-        <span>{badge}</span>
-      </div>
-      {children}
-    </div>
+    <div style={{
+      width: 15, height: 15, border: '1.5px solid #000',
+      display: 'inline-block', verticalAlign: 'middle',
+    }} />
   )
 }
 
-function OperationRow({ index, label, barcodeVal }: {
-  index: number | string
-  label: string
-  barcodeVal: string
-}) {
+function NotesCell({ initialValue, onSave }: { initialValue: string; onSave: (val: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null)
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '38px 90px 1fr auto 80px 30px',
-      alignItems: 'center',
-      borderLeft: '1px solid #9ca3af',
-      borderRight: '1px solid #9ca3af',
-      borderBottom: '1px solid #9ca3af',
-      minHeight: 64,
-    }}>
-      {/* Numer */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 14, fontWeight: 700,
-        borderRight: '1px solid #d1d5db',
-        height: '100%',
-      }}>
-        {index}
-      </div>
-
-      {/* Nazwa operacji */}
-      <div style={{
-        display: 'flex', alignItems: 'center',
-        fontSize: 13, fontWeight: 700, padding: '0 8px',
-        borderRight: '1px solid #d1d5db',
-        height: '100%',
-      }}>
-        {label}
-      </div>
-
-      {/* Barcode */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '4px 6px',
-        borderRight: '1px solid #d1d5db',
-      }}>
-        <Barcode value={barcodeVal} height={38} fontSize={7} />
-      </div>
-
-      {/* Podpis */}
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end',
-        padding: '4px 10px 6px',
-        borderRight: '1px solid #d1d5db',
-        height: '100%',
-      }}>
-        <div style={{ borderBottom: '1px solid #555', width: 80, marginBottom: 2 }} />
-        <span style={{ fontSize: 9, color: '#555' }}>Podpis</span>
-      </div>
-
-      {/* Data */}
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end',
-        padding: '4px 6px 6px',
-        borderRight: '1px solid #d1d5db',
-        height: '100%',
-      }}>
-        <div style={{ borderBottom: '1px solid #555', width: 68, marginBottom: 2 }} />
-        <span style={{ fontSize: 9, color: '#555' }}>Data</span>
-      </div>
-
-      {/* Checkbox */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100%',
-      }}>
-        <div style={{
-          width: 18, height: 18,
-          border: '1.5px solid #555',
-        }} />
-      </div>
-    </div>
+    <textarea
+      ref={ref}
+      defaultValue={initialValue}
+      rows={1}
+      onBlur={e => onSave(e.target.value)}
+      onInput={e => {
+        const el = e.currentTarget
+        el.style.height = 'auto'
+        el.style.height = el.scrollHeight + 'px'
+      }}
+      style={{
+        width: '100%', boxSizing: 'border-box',
+        border: 'none', outline: 'none', resize: 'none',
+        fontSize: 12, fontFamily: 'Arial, Helvetica, sans-serif',
+        padding: '2px 5px', background: 'transparent',
+        minHeight: 26, overflow: 'hidden',
+      }}
+    />
   )
 }

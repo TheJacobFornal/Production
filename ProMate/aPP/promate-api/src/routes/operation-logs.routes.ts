@@ -57,6 +57,25 @@ router.patch('/real', async (req, res) => {
   }
 })
 
+// PATCH /api/operation-logs/notes
+router.patch('/notes', async (req, res) => {
+  try {
+    const { part_id, operation_id, notes } = req.body
+    if (!part_id || !operation_id) {
+      return res.status(400).json({ message: 'part_id i operation_id są wymagane' })
+    }
+    await operationLogsRepository.updateNotes(
+      Number(part_id),
+      Number(operation_id),
+      notes != null && notes !== '' ? String(notes) : null,
+    )
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('operation-logs PATCH notes error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
 // PATCH /api/operation-logs/phase
 router.patch('/phase', async (req, res) => {
   try {

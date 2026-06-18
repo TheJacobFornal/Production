@@ -25,6 +25,7 @@ export interface Part {
   barcode: string | null
   finished_at: string | null
   rework_parent_part_id: number | null
+  deadline_at: string | null
 }
 
 export interface OrderListItem {

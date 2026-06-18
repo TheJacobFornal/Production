@@ -38,6 +38,7 @@ export interface OperationLog {
   operation_order: number | null
   barcode:         string | null
   cost:            number | null
+  notes:           string | null
 }
 
 export const operationLogsApi = {
@@ -62,6 +63,12 @@ export const operationLogsApi = {
       body: JSON.stringify({ part_id: partId, operation_id: operationId, phase_id: phaseId }),
     }),
 
+  saveNotes: (partId: number, operationId: number, notes: string | null) =>
+    request<{ ok: boolean }>('/operation-logs/notes', {
+      method: 'PATCH',
+      body: JSON.stringify({ part_id: partId, operation_id: operationId, notes }),
+    }),
+
   saveReal: (partId: number, operationId: number, timeReal: number | null) =>
     request<{ ok: boolean }>('/operation-logs/real', {
       method: 'PATCH',
@@ -70,16 +77,18 @@ export const operationLogsApi = {
 }
 
 export interface FormLogDims {
-  part_id:     number
-  dim_a_est:   number | null
-  dim_b_est:   number | null
-  dim_c_est:   number | null
-  dim_a_real:  number | null
-  dim_b_real:  number | null
-  dim_c_real:  number | null
-  material_id: number | null
-  weight_one:  number | null
-  area_one:    number | null
+  part_id:         number
+  dim_a_est:       number | null
+  dim_b_est:       number | null
+  dim_c_est:       number | null
+  dim_a_real:      number | null
+  dim_b_real:      number | null
+  dim_c_real:      number | null
+  material_id:     number | null
+  material_est_id: number | null
+  weight_one:      number | null
+  area_one:        number | null
+  cost_kit:        number | null
 }
 
 export interface Price {
@@ -200,6 +209,7 @@ export interface PartWithOrder {
   barcode:               string | null
   finished_at:           string | null
   rework_parent_part_id: number | null
+  deadline_at:           string | null
   order_number:          string
 }
 
@@ -267,6 +277,12 @@ export const formLogApi = {
     request<{ ok: boolean }>('/form-log/real', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+
+  saveMaterialEst: (partId: number, materialEstId: number | null) =>
+    request<{ ok: boolean }>('/form-log/material-est', {
+      method: 'PATCH',
+      body: JSON.stringify({ part_id: partId, material_est_id: materialEstId }),
     }),
 
   getByPartIds: (partIds: number[]) =>

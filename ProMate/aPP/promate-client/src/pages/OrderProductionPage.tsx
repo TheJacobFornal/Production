@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ordersApi, operationLogsApi, OperationLog, formLogApi, FormLogDims, cooperationsApi, Cooperation, cooperationLogApi, CooperationLog, commercialApi, partsApi, PartSearchResult } from '../services/api'
+import { ordersApi, operationLogsApi, OperationLog, formLogApi, FormLogDims, cooperationsApi, Cooperation, cooperationLogApi, CooperationLog, commercialApi, partsApi, PartSearchResult, materialsApi, Material } from '../services/api'
 import { Part } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -31,6 +31,7 @@ interface Row {
   kop2:            string
   kop3:            string
   suma_czasu:      string
+  material:        string
   handlowka:             boolean
   phase_id:              number | null
   przerobka:             boolean   // = !!rework_parent_part_id
@@ -72,15 +73,16 @@ const COLS: ColDef[] = [
   { key: 'tokcnc',    label: 'TOKCNC',    group: 'operacje', width: 70 },
   { key: 'fcnc',      label: 'FCNC',      group: 'operacje', width: 70 },
   { key: 'fcnc_robo', label: 'FCNC ROBO', group: 'operacje', width: 70 },
+  { key: 'suma_czasu', label: 'Suma czasu', group: 'inne', readOnly: true, width: 72 },
   { key: 'col_a',     label: 'A',          group: 'dodatkowe',  width: 40 },
   { key: 'col_b',     label: 'B',          group: 'dodatkowe',  width: 40 },
   { key: 'col_c',     label: 'C',          group: 'dodatkowe',  width: 40 },
+  { key: 'material',   label: 'Materiał',   group: 'dodatkowe', width: 110 },
   { key: 'kop1',      label: 'Kop. 1',    group: 'kooperacje', width: 95 },
   { key: 'kop2',      label: 'Kop. 2',    group: 'kooperacje', width: 95 },
   { key: 'kop3',      label: 'Kop. 3',    group: 'kooperacje', width: 95 },
-  { key: 'suma_czasu', label: 'Suma czasu', group: 'inne', readOnly: true, width: 72 },
-  { key: 'handlowka',  label: 'Handlówka',  group: 'inne', checkbox: true, width: 62 },
-  { key: 'przerobka',  label: 'Przeróbka',  group: 'inne', width: 62 },
+  { key: 'handlowka',  label: 'Handl.',     group: 'inne', checkbox: true, width: 62 },
+  { key: 'przerobka',  label: 'Przer.',      group: 'inne', width: 62 },
 ]
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -159,7 +161,7 @@ function partToRow(p: Part, orderNumber: string, termin: string): Row {
     ploter: '', ploter_seq: '', fkg: '', fkg_seq: '', fko: '', fko_seq: '',
     tok: '', tok_seq: '', tokcnc: '', tokcnc_seq: '', fcnc: '', fcnc_seq: '', fcnc_robo: '', fcnc_robo_seq: '',
     col_a: '', col_b: '', col_c: '',
-    kop1: '', kop2: '', kop3: '', suma_czasu: '',
+    kop1: '', kop2: '', kop3: '', suma_czasu: '', material: '',
     phase_id: p.phase_id ?? null,
     handlowka: false, przerobka: !!p.rework_parent_part_id,
     rework_parent_part_id: p.rework_parent_part_id ?? null,
@@ -370,17 +372,19 @@ function OpCell({ timeVal, seqVal, usedSeqs, active, rowActive, editing, onActiv
 // ─── KopCell ──────────────────────────────────────────────────────────────────
 
 interface KopCellProps {
-  coopId:       string
-  cooperations: Cooperation[]
-  slot:         number
-  active:       boolean
-  rowActive:    boolean
-  onActivate:   () => void
+  coopId:        string
+  cooperations:  Cooperation[]
+  invalid:       boolean
+  invalidName:   string
+  slot:          number
+  active:        boolean
+  rowActive:     boolean
+  onActivate:    () => void
   onAfterSelect: () => void
-  onUpdate:     (id: string) => void
+  onUpdate:      (id: string) => void
 }
 
-function KopCell({ coopId, cooperations, active, rowActive, onActivate, onAfterSelect, onUpdate }: KopCellProps) {
+function KopCell({ coopId, cooperations, invalid, invalidName, active, rowActive, onActivate, onAfterSelect, onUpdate }: KopCellProps) {
   const KOP_ACTIVE = '#ede9fe'
   const KOP_ROW    = '#faf5ff'
   const KOP_RING   = '#7c3aed'
@@ -391,7 +395,7 @@ function KopCell({ coopId, cooperations, active, rowActive, onActivate, onAfterS
     height: ROW_H, padding: 0,
     borderRight: BORDER, borderBottom: BORDER, borderTop: 'none', borderLeft: 'none',
     whiteSpace: 'nowrap', overflow: 'hidden', boxSizing: 'border-box',
-    outline: active ? `2px solid ${KOP_RING}` : 'none',
+    outline: active ? `2px solid ${KOP_RING}` : invalid ? '2px solid #f97316' : 'none',
     outlineOffset: -2, background: bg,
   }
 
@@ -416,14 +420,19 @@ function KopCell({ coopId, cooperations, active, rowActive, onActivate, onAfterS
           width: '100%', height: ROW_H - 1,
           border: 'none', outline: 'none',
           fontSize: 12,
-          background: coopId ? '#f5f3ff' : bg,
-          color: coopId ? '#5b21b6' : '#9ca3af',
+          background: invalid ? '#fff7ed' : coopId ? '#f5f3ff' : bg,
+          color: invalid ? '#c2410c' : coopId ? '#5b21b6' : '#9ca3af',
           fontWeight: coopId ? 600 : 400,
           padding: '0 6px',
           cursor: 'pointer',
         }}
       >
         <option value="">—</option>
+        {invalid && (
+          <option value={coopId} style={{ color: '#c2410c', fontStyle: 'italic' }}>
+            {invalidName}
+          </option>
+        )}
         {cooperations.map(c => (
           <option
             key={c.id} value={String(c.id)}
@@ -491,6 +500,7 @@ export default function OrderProductionPage() {
   const [active,       setActive]       = useState<{ r: number; c: number } | null>(null)
   const [editing,      setEditing]      = useState<{ r: number; c: number } | null>(null)
   const [cooperations, setCooperations] = useState<Cooperation[]>([])
+  const [materials,    setMaterials]    = useState<Material[]>([])
   const [orderId,      setOrderId]      = useState<number | null>(null)
 
   // Przeróbka modal
@@ -547,11 +557,10 @@ export default function OrderProductionPage() {
     return acc
   }, [])
 
-  // ── Załaduj kooperacje (raz, niezależnie od zamówienia) ───────────────────
+  // ── Załaduj kooperacje i materiały (raz) ─────────────────────────────────
   useEffect(() => {
-    cooperationsApi.getAll()
-      .then(setCooperations)
-      .catch(console.error)
+    cooperationsApi.getAll().then(setCooperations).catch(console.error)
+    materialsApi.getAll().then(setMaterials).catch(console.error)
   }, [])
 
   // ── Load ──────────────────────────────────────────────────────────────────
@@ -589,6 +598,7 @@ export default function OrderProductionPage() {
             if (dl.dim_a_est != null) rec[ri]['col_a'] = String(dl.dim_a_est)
             if (dl.dim_b_est != null) rec[ri]['col_b'] = String(dl.dim_b_est)
             if (dl.dim_c_est != null) rec[ri]['col_c'] = String(dl.dim_c_est)
+            if (dl.material_est_id != null) rec[ri]['material'] = String(dl.material_est_id)
           })
 
           const coopLogs = await cooperationLogApi.getByPartIds(partIds).catch(e => { console.error('cooperation-log load error:', e); return [] as CooperationLog[] })
@@ -769,8 +779,10 @@ export default function OrderProductionPage() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  const modalRow  = przerobkaIdx !== null ? rows[przerobkaIdx] : null
-  const totalCzas = rows.reduce((s, r) => s + sumRow(r), 0)
+  const modalRow         = przerobkaIdx !== null ? rows[przerobkaIdx] : null
+  const totalCzas        = rows.reduce((s, r) => s + sumRow(r), 0)
+  const filteredMaterials    = materials.filter(m => m.density != null && m.cost != null)
+  const filteredCooperations = cooperations.filter(c => c.price != null)
 
   // ── Loading / error ───────────────────────────────────────────────────────
   if (loading) return (
@@ -865,7 +877,13 @@ export default function OrderProductionPage() {
                       // Kolumny poza operacjami: jeden wiersz z etykietą (rowSpan=2)
                       return (
                         <th key={col.key} rowSpan={2}
-                          style={thStyle(col, colWidths[ci], active?.c === ci, true)}>
+                          style={{
+                            ...thStyle(col, colWidths[ci], active?.c === ci, true),
+                            ...(col.key === 'suma_czasu' ? {
+                              background: active?.c === ci ? GROUP_BG_ACTIVE.operacje : GROUP_BG.operacje,
+                              color: GROUP_TEXT.operacje,
+                            } : {}),
+                          }}>
                           {col.label}
                         </th>
                       )
@@ -886,14 +904,6 @@ export default function OrderProductionPage() {
                       </th>
                     )
                   })}
-                  {/* Kolumna druku karty */}
-                  <th rowSpan={2} style={{
-                    width: 36, minWidth: 36,
-                    background: '#f8fafc', borderTop: BORDER, borderRight: BORDER, borderBottom: BORDER,
-                    fontSize: 10, fontWeight: 600, color: '#64748b', textAlign: 'center',
-                  }}>
-                    Karta
-                  </th>
                 </tr>
 
                 {/* ── Wiersz 2: tylko etykiety kolumn operacji ─────────────── */}
@@ -919,6 +929,50 @@ export default function OrderProductionPage() {
                         const isActive  = isRowActive && active?.c === ci
                         const isEditing = editing?.r === ri && editing?.c === ci
 
+                        if (col.key === 'lp') {
+                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : '#fff'
+                          return (
+                            <td key={col.key} style={{
+                              ...stickyBase(col, bg),
+                              height: ROW_H, padding: 0,
+                              borderRight: BORDER, borderBottom: BORDER, borderTop: 'none', borderLeft: 'none',
+                              outline: isActive ? `2px solid ${ACTIVE_RING}` : 'none',
+                              outlineOffset: -2, boxSizing: 'border-box', whiteSpace: 'nowrap', overflow: 'hidden',
+                            }} onClick={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}>
+                              <div style={{ height: ROW_H, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
+                                <span
+                                  onClick={e => { e.stopPropagation(); window.open(`/karta-produkcyjna/${row.id}`, '_blank') }}
+                                  style={{ color: '#1d4ed8', cursor: 'pointer', fontWeight: 500 }}
+                                  title="Otwórz kartę wyrobu"
+                                >
+                                  {ri + 1}
+                                </span>
+                              </div>
+                            </td>
+                          )
+                        }
+                        if (col.key === 'numer_detalu') {
+                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : '#fff'
+                          return (
+                            <td key={col.key} style={{
+                              ...stickyBase(col, bg),
+                              height: ROW_H, padding: 0,
+                              borderRight: BORDER, borderBottom: BORDER, borderTop: 'none', borderLeft: 'none',
+                              outline: isActive ? `2px solid ${ACTIVE_RING}` : 'none',
+                              outlineOffset: -2, boxSizing: 'border-box', whiteSpace: 'nowrap', overflow: 'hidden',
+                            }} onClick={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}>
+                              <div style={{ padding: '0 6px', height: ROW_H, display: 'flex', alignItems: 'center', fontSize: 13 }}>
+                                <span
+                                  onClick={e => { e.stopPropagation(); window.open(`/api/parts/${row.id}/pdf`, '_blank') }}
+                                  style={{ color: '#1d4ed8', cursor: 'pointer', fontWeight: 500 }}
+                                  title="Otwórz PDF rysunku"
+                                >
+                                  {row.numer_detalu}
+                                </span>
+                              </div>
+                            </td>
+                          )
+                        }
                         if (col.key === 'przerobka') {
                           const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : '#fff'
                           return (
@@ -1001,11 +1055,15 @@ export default function OrderProductionPage() {
                           )
                         }
                         if (col.group === 'kooperacje') {
-                          const coopId = (row as unknown as Record<string, string>)[col.key] ?? ''
+                          const coopId     = (row as unknown as Record<string, string>)[col.key] ?? ''
+                          const invalidCoop = !!coopId && !filteredCooperations.some(c => String(c.id) === coopId)
+                          const invalidCoopName = invalidCoop ? (cooperations.find(c => String(c.id) === coopId)?.name ?? coopId) : ''
                           return (
                             <KopCell key={col.key}
                               coopId={coopId}
-                              cooperations={cooperations}
+                              cooperations={filteredCooperations}
+                              invalid={invalidCoop}
+                              invalidName={invalidCoopName}
                               slot={KOP_SLOT[col.key]}
                               active={isActive} rowActive={isRowActive}
                               onActivate={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
@@ -1019,6 +1077,64 @@ export default function OrderProductionPage() {
                                 }).catch(console.error)
                               }}
                             />
+                          )
+                        }
+                        if (col.key === 'material') {
+                          const matId     = row.material
+                          const invalidMat = !!matId && !filteredMaterials.some(m => String(m.id) === matId)
+                          const bg = isActive ? GROUP_BG_ACTIVE.dodatkowe : isRowActive ? '#f0fdfa' : '#fff'
+                          return (
+                            <td key={col.key} style={{
+                              minWidth: colWidths[ci], maxWidth: colWidths[ci], width: colWidths[ci],
+                              padding: 0, borderRight: BORDER, borderBottom: BORDER, borderTop: 'none', borderLeft: 'none',
+                              outline: isActive ? `2px solid ${GROUP_TEXT.dodatkowe}` : invalidMat ? '2px solid #f97316' : 'none',
+                              outlineOffset: -1,
+                              background: bg, boxSizing: 'border-box',
+                            }} onClick={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}>
+                              <select
+                                value={matId}
+                                onChange={e => {
+                                  e.stopPropagation()
+                                  const val = e.target.value
+                                  updateCell(ri, 'material', val)
+                                  formLogApi.saveMaterialEst(row.id, val ? parseInt(val) : null).catch(console.error)
+                                }}
+                                onClick={e => e.stopPropagation()}
+                                onKeyDown={e => {
+                                  if (e.key === 'Delete' || e.key === 'Backspace') {
+                                    e.preventDefault(); e.stopPropagation()
+                                    updateCell(ri, 'material', '')
+                                    formLogApi.saveMaterialEst(row.id, null).catch(console.error)
+                                  }
+                                }}
+                                style={{
+                                  width: '100%', height: ROW_H - 1,
+                                  border: 'none', outline: 'none', fontSize: 12,
+                                  background: invalidMat ? '#fff7ed' : matId ? '#e0fdf4' : bg,
+                                  color: invalidMat ? '#c2410c' : matId ? GROUP_TEXT.dodatkowe : '#9ca3af',
+                                  fontWeight: matId ? 600 : 400,
+                                  padding: '0 6px', cursor: 'pointer',
+                                }}
+                              >
+                                <option value="">—</option>
+                                {invalidMat && (
+                                  <option value={matId} style={{ color: '#c2410c', fontStyle: 'italic' }}>
+                                    {materials.find(m => String(m.id) === matId)?.name ?? matId}
+                                  </option>
+                                )}
+                                {filteredMaterials.map(m => (
+                                  <option key={m.id} value={String(m.id)}
+                                    style={{
+                                      background: String(m.id) === matId ? '#e0fdf4' : '#fff',
+                                      color:      String(m.id) === matId ? GROUP_TEXT.dodatkowe : '#0f172a',
+                                      fontWeight: String(m.id) === matId ? 700 : 400,
+                                    }}
+                                  >
+                                    {m.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
                           )
                         }
                         return (
@@ -1047,26 +1163,6 @@ export default function OrderProductionPage() {
                           />
                         )
                       })}
-                      {/* Przycisk druku karty produkcyjnej */}
-                      <td style={{
-                        width: 36, padding: 0, textAlign: 'center',
-                        borderRight: BORDER, borderBottom: BORDER,
-                        background: isRowActive ? BG_ROW_ACTIVE : '#fff',
-                      }}>
-                        <button
-                          title="Drukuj kartę produkcyjną"
-                          onClick={() => window.open(`/karta-produkcyjna/${row.id}`, '_blank')}
-                          style={{
-                            width: 28, height: 28, border: '1px solid #d1d5db',
-                            borderRadius: 5, background: '#f8fafc',
-                            cursor: 'pointer', fontSize: 14, lineHeight: 1,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            margin: '0 auto',
-                          }}
-                        >
-                          🖨
-                        </button>
-                      </td>
                     </tr>
                   )
                 })}
