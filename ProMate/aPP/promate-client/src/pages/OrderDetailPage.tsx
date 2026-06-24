@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Cooperation, cooperationLogApi, cooperationsApi, formLogApi, Material, materialsApi, Operation, operationLogsApi, operationsApi, ordersApi, priceApi } from '../services/api'
-import { Part } from '../types'
+import { Cooperation, cooperationLogApi, cooperationsApi, formLogApi, Material, materialsApi, Operation, operationLogsApi, operationsApi, partsApi, PartWithOrder, priceApi } from '../services/api'
 
 // ─── Kolory grup ──────────────────────────────────────────────────────────────
 
@@ -229,14 +228,24 @@ function stickyTdBase(col: ColDef, bg: string): React.CSSProperties {
 
 type Row = Record<string, string>
 
-function partToRow(p: Part, orderNumber: string): Row {
+function calcIlosc(p: PartWithOrder): string {
+  if (p.quantity_right === 0) return String(p.quantity_left)
+  if (p.quantity_left  === 0) return String(p.quantity_right)
+  return `${p.quantity_right}+${p.quantity_left}`
+}
+
+function parseIlosc(s: string): number {
+  return s.split('+').reduce((sum, part) => sum + (parseFloat(part) || 0), 0)
+}
+
+function partToRow(p: PartWithOrder, orderNumber: string): Row {
   return {
     _id:            String(p.id),
     lp:             '',
     numer_zlecenia: orderNumber,
     numer_detalu:   p.part_number,
     nazwa_detalu:   p.name,
-    ilosc:          String(p.quantity_right),
+    ilosc:          calcIlosc(p),
     kop1: '', kop2: '', kop3: '',
     pila: '', ploter: '', fk: '', tk: '', fcnc2: '', tcnc: '', szlif: '', spaw: '', slus: '', total: '',
     material: '', a: '', b: '', c_col: '', sr: '', dl: '', masa_szt: '', masa_kpl: '', pow_szt: '', pow_kpl: '',
@@ -406,6 +415,64 @@ function MatCell({ value, materials, active, rowActive, onActivate, onUpdate }: 
   )
 }
 
+// ─── KopCell ──────────────────────────────────────────────────────────────────
+
+interface KopCellProps {
+  value:        string
+  cooperations: Cooperation[]
+  active:       boolean
+  rowActive:    boolean
+  onActivate:   () => void
+  onUpdate:     (name: string) => void
+}
+
+function KopCell({ value, cooperations, active, rowActive, onActivate, onUpdate }: KopCellProps) {
+  const bg = active ? GROUP_BG_ACTIVE.operacje : rowActive ? '#fff7ed' : '#fff'
+  const available = cooperations.filter(c => c.price != null && c.unit)
+  return (
+    <td style={{
+      minWidth: W, maxWidth: W, width: W, padding: 0,
+      borderRight: BORDER, borderBottom: BORDER, borderTop: 'none', borderLeft: 'none',
+      outline: active ? `2px solid ${GROUP_TEXT.operacje}` : 'none', outlineOffset: -1,
+      background: bg, boxSizing: 'border-box',
+    }} onClick={onActivate}>
+      <select
+        value={value}
+        onChange={e => { e.stopPropagation(); onUpdate(e.target.value) }}
+        onClick={e => e.stopPropagation()}
+        onKeyDown={e => {
+          if (e.key === 'Delete' || e.key === 'Backspace') {
+            e.preventDefault(); e.stopPropagation(); onUpdate('')
+          }
+        }}
+        style={{
+          width: '100%', height: 29,
+          border: 'none', outline: 'none', fontSize: 12,
+          background: value ? '#fff7ed' : bg,
+          color: value ? GROUP_TEXT.operacje : '#9ca3af',
+          fontWeight: value ? 600 : 400,
+          padding: '0 6px', cursor: 'pointer',
+        }}
+      >
+        <option value="">—</option>
+        {available.map(c => (
+          <option key={c.id} value={c.name}
+            style={{
+              background: c.name === value ? '#fff7ed' : '#fff',
+              color:      c.name === value ? GROUP_TEXT.operacje : '#0f172a',
+              fontWeight: c.name === value ? 700 : 400,
+            }}
+          >
+            {c.name}
+          </option>
+        ))}
+      </select>
+    </td>
+  )
+}
+
+const KOP_SLOT: Record<string, number> = { kop1: 1, kop2: 2, kop3: 3 }
+
 // ─── Strona ───────────────────────────────────────────────────────────────────
 
 export default function OrderDetailPage() {
@@ -515,7 +582,7 @@ export default function OrderDetailPage() {
     for (const row of rows) {
       const partId  = Number(row._id)
       const matSzt  = parseFloat(calcMaterialSzt(row, materials) || '0')
-      const qty     = parseFloat(row['ilosc'] || '0')
+      const qty     = parseIlosc(row['ilosc'] || '0')
       const costKit = matSzt && qty ? Math.round(matSzt * qty * 100) / 100 : null
       const prev    = savedCostKitRef.current.get(partId)
       if (prev === costKit) continue
@@ -538,7 +605,7 @@ export default function OrderDetailPage() {
       const materialSzt   = calcMaterialSzt(row, materials)
       const materialKpl   = (() => {
         const szt = parseFloat(materialSzt || '0')
-        const qty = parseFloat(row['ilosc'] || '0')
+        const qty = parseIlosc(row['ilosc'] || '0')
         return szt && qty ? String(Math.round(szt * qty * 100) / 100) : ''
       })()
       const handlowka     = (row as unknown as Record<string, string>)['handlowka'] || ''
@@ -548,7 +615,7 @@ export default function OrderDetailPage() {
       })()
       const cenaSzt       = (() => {
         const kpl = parseFloat(cenaKpl || '0')
-        const qty = parseFloat(row['ilosc'] || '0')
+        const qty = parseIlosc(row['ilosc'] || '0')
         return kpl && qty ? String(Math.round(kpl / qty * 100) / 100) : ''
       })()
 
@@ -572,18 +639,9 @@ export default function OrderDetailPage() {
   // ── Ładowanie wszystkich detali ze wszystkich zamówień ────────────────────
   useEffect(() => {
     setLoading(true)
-    ordersApi.getAll()
-      .then(orders =>
-        Promise.all(
-          orders.map(o =>
-            ordersApi.getParts(o.id, 'D8').then((parts: Part[]) =>
-              parts.map(p => partToRow(p, o.order_number))
-            )
-          )
-        )
-      )
-      .then(async nested => {
-        const flat    = nested.flat()
+    partsApi.getAllInPhase('D10', 'D11')
+      .then(parts => parts.map(p => partToRow(p, p.order_number)))
+      .then(async flat => {
         const partIds = flat.map(r => Number(r._id))
         const [coops, copLogs, formLogs, opLogs, ops, prices] = await Promise.all([
           cooperationsApi.getAll(),
@@ -636,9 +694,9 @@ export default function OrderDetailPage() {
           opTimeMap.get(log.part_id)![key] = String(log.time_real)
         }
 
-        // material_id → nazwa (jeśli materials już załadowane)
+        // material_est_id → nazwa (materiał szacowany)
         const currentMats = materialsRef.current
-        const formMatMap  = new Map(formLogs.map(fl => [fl.part_id, fl.material_id]))
+        const formMatMap  = new Map(formLogs.map(fl => [fl.part_id, fl.material_est_id]))
 
         setRows(flat.map((r, i) => {
           const partId  = Number(r._id)
@@ -1014,7 +1072,7 @@ export default function OrderDetailPage() {
                   const rowMaterialSzt = calcMaterialSzt(row, materials)
                   const rowMaterialKpl = (() => {
                     const szt = parseFloat(rowMaterialSzt || '0')
-                    const qty = parseFloat(row['ilosc']   || '0')
+                    const qty = parseIlosc(row['ilosc']   || '0')
                     if (!szt || !qty) return ''
                     return String(Math.round(szt * qty * 100) / 100)
                   })()
@@ -1029,7 +1087,7 @@ export default function OrderDetailPage() {
                   })()
                   const rowCenaSzt = (() => {
                     const kpl = parseFloat(rowCenaKpl   || '0')
-                    const qty = parseFloat(row['ilosc'] || '0')
+                    const qty = parseIlosc(row['ilosc'] || '0')
                     if (!kpl || !qty) return ''
                     return String(Math.round(kpl / qty * 100) / 100)
                   })()
@@ -1051,6 +1109,27 @@ export default function OrderDetailPage() {
                             />
                           )
                         }
+                        if (col.key === 'kop1' || col.key === 'kop2' || col.key === 'kop3') {
+                          return (
+                            <KopCell
+                              key={col.key}
+                              value={row[col.key] ?? ''}
+                              cooperations={cooperations}
+                              active={isActive}
+                              rowActive={isRowActive}
+                              onActivate={() => { setActive({ r: ri, c: ci }); setEditing(null) }}
+                              onUpdate={name => {
+                                updateCell(row._id, col.key, name)
+                                const coop = cooperations.find(c => c.name === name)
+                                cooperationLogApi.save({
+                                  part_id:        Number(row._id),
+                                  cooperation_id: coop?.id ?? null,
+                                  slot:           KOP_SLOT[col.key],
+                                }).catch(console.error)
+                              }}
+                            />
+                          )
+                        }
                         return (
                           <Cell
                             key={col.key}
@@ -1068,7 +1147,7 @@ export default function OrderDetailPage() {
                               if (col.key === 'pow_szt')  return calcPowSzt(row)
                               if (col.key === 'masa_kpl' || col.key === 'pow_kpl') {
                                 const szt = parseFloat(col.key === 'masa_kpl' ? calcMass(row, materials) : calcPowSzt(row))
-                                const qty = parseFloat(row['ilosc'] || '1')
+                                const qty = parseIlosc(row['ilosc'] || '1')
                                 if (!szt || isNaN(szt) || !qty) return ''
                                 return String(Math.round(szt * qty * 100) / 100)
                               }

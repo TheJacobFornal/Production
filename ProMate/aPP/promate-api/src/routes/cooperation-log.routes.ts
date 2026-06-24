@@ -34,6 +34,47 @@ router.get('/', async (req, res) => {
   }
 })
 
+// PATCH /api/cooperation-log/cycle  { part_id, slot }
+router.patch('/cycle', async (req, res) => {
+  try {
+    const { part_id, slot } = req.body
+    if (!part_id || !slot) return res.status(400).json({ message: 'part_id i slot wymagane' })
+    const updated = await cooperationLogRepository.cyclePhase(Number(part_id), Number(slot))
+    res.json(updated ?? { phase_id: null, phase_name: null, sent_at: null, received_at: null })
+  } catch (err) {
+    console.error('cooperation-log PATCH cycle error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// GET /api/cooperation-log/panel
+router.get('/panel', async (req, res) => {
+  try {
+    const rows = await cooperationLogRepository.getAllForPanel()
+    res.json(rows)
+  } catch (err) {
+    console.error('cooperation-log GET panel error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// PATCH /api/cooperation-log/dates
+router.patch('/dates', async (req, res) => {
+  try {
+    const { part_id, slot, sent_at, received_at } = req.body
+    if (!part_id || !slot) return res.status(400).json({ message: 'part_id i slot wymagane' })
+    await cooperationLogRepository.updateDates(
+      Number(part_id), Number(slot),
+      sent_at    || null,
+      received_at || null,
+    )
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('cooperation-log PATCH dates error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
 // PATCH /api/cooperation-log/cost
 router.patch('/cost', async (req, res) => {
   try {

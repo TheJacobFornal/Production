@@ -33,7 +33,8 @@ router.get('/:id', async (req, res) => {
 // GET /api/orders/:id/parts?minPhase=D3
 router.get('/:id/parts', async (req, res) => {
   const minPhase = req.query.minPhase as string | undefined
-  const parts = await orderRepository.getParts(Number(req.params.id), minPhase)
+  const maxPhase = req.query.maxPhase as string | undefined
+  const parts = await orderRepository.getParts(Number(req.params.id), minPhase, maxPhase)
   res.json(parts)
 })
 
@@ -51,7 +52,8 @@ router.get('/printers', async (_req, res) => {
 router.post('/:id/ready-for-production', async (req, res) => {
   try {
     const orderId = Number(req.params.id)
-    const { errors } = await generateMergedPdfsForOrder(orderId)
+    const printer: string | undefined = req.body?.printer || undefined
+    const { errors } = await generateMergedPdfsForOrder(orderId, printer)
     await orderRepository.readyForProduction(orderId)
     res.json({ ok: true, pdfErrors: errors.length > 0 ? errors : undefined })
   } catch (err) {

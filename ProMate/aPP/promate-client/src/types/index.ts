@@ -18,7 +18,8 @@ export interface Part {
   name: string
   quantity_right: number
   quantity_left: number
-  phase_id: number | null
+  phase_id:   number | null
+  phase_name: string | null
   location_id: number | null
   card_printed: boolean
   sticker_printed: boolean
@@ -29,11 +30,13 @@ export interface Part {
 }
 
 export interface OrderListItem {
-  order_number:    string
-  deadline_at:     string | null
-  parts_count:     number
-  completed_count: number
-  phase_name:      string | null
+  order_number:           string
+  deadline_at:            string | null
+  parts_count:            number
+  completed_count:        number
+  d10_count:              number
+  phase_name:             string | null
+  missing_drawings_count: number
 }
 
 export interface OrderSummary {

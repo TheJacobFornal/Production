@@ -1,5 +1,8 @@
 import { Routes, Route, Outlet, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import Sidebar from './components/Sidebar'
+import LoginPage from './pages/LoginPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import HomePage from './pages/HomePage'
 import OrdersPage from './pages/OrdersPage'
 import OrderProductionPage from './pages/OrderProductionPage'
@@ -7,7 +10,9 @@ import ProductionPlanningPage from './pages/ProductionPlanningPage'
 import OrderDetailPage from './pages/OrderDetailPage'
 import PartDetailPage from './pages/PartDetailPage'
 import HandlowkaPage from './pages/HandlowkaPage'
+import KooperacjaPage from './pages/KooperacjaPage'
 import ProductionCardPage from './pages/ProductionCardPage'
+import SettingsPage from './pages/SettingsPage'
 
 // ─── Layout ──────────────────────────────────────────────────────────────────
 
@@ -22,35 +27,52 @@ function Layout() {
   )
 }
 
+// ─── Route guard ─────────────────────────────────────────────────────────────
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth()
+  if (!user) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
 // ─── App ─────────────────────────────────────────────────────────────────────
 
-function App() {
+function AppRoutes() {
   return (
     <Routes>
-      {/* Karta produkcyjna — standalone, bez sidebaru */}
-      <Route path="/karta-produkcyjna/:partId" element={<ProductionCardPage />} />
+      {/* Logowanie i reset hasła — publiczne */}
+      <Route path="/login"       element={<LoginPage />} />
+      <Route path="/reset-hasla" element={<ResetPasswordPage />} />
 
-      <Route element={<Layout />}>
+      {/* Karta produkcyjna — standalone */}
+      <Route path="/karta-produkcyjna/:partId" element={
+        <RequireAuth><ProductionCardPage /></RequireAuth>
+      } />
+
+      <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route path="/"                                          element={<Navigate to="/home" replace />} />
-        {/* Strona główna — siatka produkcyjna ze wszystkimi detalami */}
         <Route path="/home"                                      element={<HomePage />} />
-        {/* Lista zamówień */}
         <Route path="/orders"                                    element={<OrdersPage />} />
-        {/* Klik z listy zamówień → widok zamówienia (Kop.1/2/3, Handlówka, Przeróbka) */}
         <Route path="/orders/:orderNumber"                       element={<OrderProductionPage />} />
-        {/* Sidebar "Planowanie produkcji" → siatka z kolorowaniem statusów */}
         <Route path="/orders/:orderNumber/planowanie"            element={<ProductionPlanningPage />} />
-        {/* Karta Detalu — formularz standalone */}
         <Route path="/karta-detalu/:numer_detalu"                element={<PartDetailPage />} />
-        {/* Dane poprodukcyjne — wszystkie detale, bez wyboru zamówienia */}
         <Route path="/poprodukcyjne"                             element={<OrderDetailPage />} />
-        {/* Stara trasa — zachowana dla kompatybilności */}
         <Route path="/orders/:orderNumber/poprodukcyjne"         element={<OrderDetailPage />} />
-        {/* Zamówienia handlówki */}
         <Route path="/handlowka"                                 element={<HandlowkaPage />} />
+        <Route path="/kooperacja"                                element={<KooperacjaPage />} />
+        <Route path="/ustawienia"                                element={<SettingsPage />} />
       </Route>
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/home" replace />} />
     </Routes>
   )
 }
 
-export default App
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
+  )
+}

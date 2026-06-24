@@ -1,4 +1,5 @@
 import { getDb, sql } from '../config/database'
+import { syncOrderPhase } from './order-phase.helper'
 
 export interface OperationLog {
   id:              number
@@ -44,18 +45,11 @@ class OperationLogsRepository {
 
         DECLARE @d3Id INT = (SELECT id FROM [phase] WHERE name = 'D3' AND type = 'part')
         DECLARE @d2Id INT = (SELECT id FROM [phase] WHERE name = 'D2' AND type = 'part')
-        -- D3 gdy: ≥1 czas operacji i ≥2 wymiary
         DECLARE @hasTime INT = (
           SELECT COUNT(*) FROM operation_logs
           WHERE part_id = @partId AND time_estimated IS NOT NULL
         )
-        DECLARE @dimCount INT = ISNULL((
-          SELECT CASE WHEN dim_a_est IS NOT NULL THEN 1 ELSE 0 END +
-                 CASE WHEN dim_b_est IS NOT NULL THEN 1 ELSE 0 END +
-                 CASE WHEN dim_c_est IS NOT NULL THEN 1 ELSE 0 END
-          FROM form_log WHERE part_id = @partId
-        ), 0)
-        IF @hasTime >= 1 AND @dimCount >= 2
+        IF @hasTime >= 1
           UPDATE [part] SET phase_id = @d3Id WHERE id = @partId AND (phase_id IS NULL OR phase_id < @d3Id)
         ELSE
           UPDATE [part] SET phase_id = @d2Id WHERE id = @partId AND phase_id = @d3Id
@@ -90,7 +84,33 @@ class OperationLogsRepository {
         UPDATE operation_logs
         SET phase_id = @phaseId
         WHERE part_id = @partId AND operation_id = @operationId
+
+        -- Auto-faza detalu po zmianie statusu operacji
+        DECLARE @d8Id      INT = (SELECT id FROM [phase] WHERE name = 'D8'           AND type = 'part')
+        DECLARE @d9Id      INT = (SELECT id FROM [phase] WHERE name = 'D9'           AND type = 'part')
+        DECLARE @d10Id     INT = (SELECT id FROM [phase] WHERE name = 'D10'          AND type = 'part')
+        DECLARE @exId      INT = (SELECT id FROM [phase] WHERE name = 'Wykonana'     AND type = 'operation')
+        DECLARE @wRealId   INT = (SELECT id FROM [phase] WHERE name = 'W realizacji' AND type = 'operation')
+        DECLARE @totalOps  INT = (SELECT COUNT(*) FROM operation_logs WHERE part_id = @partId)
+        DECLARE @doneOps   INT = (SELECT COUNT(*) FROM operation_logs WHERE part_id = @partId AND phase_id = @exId)
+        DECLARE @totalKoop INT = (SELECT COUNT(*) FROM cooperation_log WHERE part_id = @partId)
+        DECLARE @doneKoop  INT = (SELECT COUNT(*) FROM cooperation_log WHERE part_id = @partId AND phase_id = @exId)
+        DECLARE @inProg    INT = (SELECT COUNT(*) FROM cooperation_log WHERE part_id = @partId AND phase_id = @wRealId)
+
+        IF @totalOps > 0 AND @totalOps = @doneOps
+        BEGIN
+          IF @totalKoop = 0 OR @doneKoop = @totalKoop
+            UPDATE [part] SET phase_id = @d10Id
+            WHERE id = @partId AND (phase_id IS NULL OR phase_id < @d10Id)
+          ELSE IF @inProg > 0 OR (@doneKoop >= 1 AND @doneKoop < @totalKoop)
+            UPDATE [part] SET phase_id = @d9Id
+            WHERE id = @partId AND (phase_id IS NULL OR phase_id < @d9Id)
+          ELSE
+            UPDATE [part] SET phase_id = @d8Id
+            WHERE id = @partId AND (phase_id IS NULL OR phase_id < @d8Id)
+        END
       `)
+    await syncOrderPhase(partId)
   }
 
   async updateNotes(partId: number, operationId: number, notes: string | null): Promise<void> {

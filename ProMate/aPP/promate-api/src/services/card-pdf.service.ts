@@ -173,30 +173,19 @@ function generateHtml(data: CardData, logoBase64: string): string {
   <!-- Przygotówka -->
   <table style="margin-top:-2px;flex-shrink:0">
     <colgroup>
-      <col style="width:22%"><col style="width:13%">
-      <col style="width:13%"><col style="width:13%">
-      <col style="width:13%"><col style="width:26%">
+      <col style="width:35%"><col style="width:20%"><col style="width:45%">
     </colgroup>
     <tbody>
       <tr style="height:35px">
-        <td colspan="6" style="${BOLD};padding:5px 7px">Przygotówka</td>
+        <td colspan="3" style="${BOLD};padding:5px 7px">Przygotówka</td>
       </tr>
       <tr style="height:20px">
-        <td rowspan="2" style="${BOLD};vertical-align:middle;white-space:nowrap">Gatunek materiału</td>
-        <td colspan="4" style="${BOLD}">Formatka</td>
-        <td rowspan="2" style="${BOLD};vertical-align:middle">Data</td>
-      </tr>
-      <tr style="height:20px">
-        <td style="${BOLD}">Wysokość</td>
-        <td style="${BOLD}">Szerokość</td>
-        <td style="${BOLD}">Długość</td>
+        <td style="${BOLD}">Gatunek materiału</td>
         <td style="${BOLD}">Handlówka</td>
+        <td style="${BOLD}">Data</td>
       </tr>
       <tr style="height:45px">
         <td style="${CELL};text-align:center">${data.material_name ?? ''}</td>
-        <td style="${CELL};text-align:center">${data.dim_a ?? ''}</td>
-        <td style="${CELL};text-align:center">${data.dim_b ?? ''}</td>
-        <td style="${CELL};text-align:center">${data.dim_c ?? ''}</td>
         <td style="${CELL};text-align:center;font-weight:${data.is_handlowka ? 700 : 400}">${data.is_handlowka ? 'TAK' : 'NIE'}</td>
         <td style="${CELL}"></td>
       </tr>
@@ -264,7 +253,7 @@ export async function listPrinters(): Promise<string[]> {
   return list.map((p: { name: string }) => p.name)
 }
 
-export async function generateMergedPdfsForOrder(orderId: number): Promise<{ errors: string[] }> {
+export async function generateMergedPdfsForOrder(orderId: number, printerName?: string): Promise<{ errors: string[] }> {
   const db = await getDb()
   const partsResult = await db.request()
     .input('orderId', sql.Int, orderId)
@@ -331,22 +320,25 @@ export async function generateMergedPdfsForOrder(orderId: number): Promise<{ err
         fs.writeFileSync(outputPath, await mergedDoc.save())
         console.log(`  [PDF] Zapisano: ${outputPath}`)
 
-        const printerName = process.env.PROMATE_PRINTER ?? 'KONICA MINOLTA bizhub 224e KONSTRUKTORZY'
+        const targetPrinter = printerName ?? process.env.PROMATE_PRINTER
         try {
-          const available = await getPrinters()
-          const match = available.find((p: { name: string }) => p.name === printerName)
-          if (!match) {
-            throw new Error(`Drukarka "${printerName}" nie znaleziona. Dostępne: ${available.map((p: { name: string }) => p.name).join(', ')}`)
+          if (targetPrinter) {
+            const available = await getPrinters()
+            const match = available.find((p: { name: string }) => p.name === targetPrinter)
+            if (!match) {
+              throw new Error(`Drukarka "${targetPrinter}" nie znaleziona. Dostępne: ${available.map((p: { name: string }) => p.name).join(', ')}`)
+            }
+            await print(outputPath, { printer: match.name })
+            console.log(`  [DRUK] ${data.part_number} → ${match.name}`)
+          } else {
+            console.log(`  [DRUK] Pominięto (brak drukarki): ${data.part_number}`)
           }
-
-          // await print(outputPath, { printer: match.name })
-          console.log(`  [DRUK] WYŁĄCZONY (tymczasowo): ${data.part_number}`)
 
           await db.request()
             .input('partId', sql.Int, part.id)
             .query(`
               DECLARE @d6Id INT = (SELECT id FROM phase WHERE name = 'D6' AND type = 'part')
-              UPDATE [part] SET phase_id = @d6Id WHERE id = @partId
+              UPDATE [part] SET phase_id = @d6Id, card_printed = 1 WHERE id = @partId
             `)
           console.log(`  [STATUS] ${data.part_number} → D6`)
         } catch (printErr) {

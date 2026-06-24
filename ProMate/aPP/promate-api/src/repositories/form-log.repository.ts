@@ -40,18 +40,11 @@ class FormLogRepository {
 
         DECLARE @d3IdF INT = (SELECT id FROM [phase] WHERE name = 'D3' AND type = 'part')
         DECLARE @d2IdF INT = (SELECT id FROM [phase] WHERE name = 'D2' AND type = 'part')
-        -- D3 gdy: ≥1 czas operacji i ≥2 wymiary
         DECLARE @hasTimeF INT = (
           SELECT COUNT(*) FROM operation_logs
           WHERE part_id = @partId AND time_estimated IS NOT NULL
         )
-        DECLARE @dimCountF INT = ISNULL((
-          SELECT CASE WHEN dim_a_est IS NOT NULL THEN 1 ELSE 0 END +
-                 CASE WHEN dim_b_est IS NOT NULL THEN 1 ELSE 0 END +
-                 CASE WHEN dim_c_est IS NOT NULL THEN 1 ELSE 0 END
-          FROM form_log WHERE part_id = @partId
-        ), 0)
-        IF @hasTimeF >= 1 AND @dimCountF >= 2
+        IF @hasTimeF >= 1
           UPDATE [part] SET phase_id = @d3IdF WHERE id = @partId AND (phase_id IS NULL OR phase_id < @d3IdF)
         ELSE
           UPDATE [part] SET phase_id = @d2IdF WHERE id = @partId AND phase_id = @d3IdF

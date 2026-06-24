@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ordersApi, operationLogsApi, OperationLog, cooperationsApi, cooperationLogApi, CooperationLog, operationsApi, Operation, partsApi } from '../services/api'
+import { ordersApi, operationLogsApi, OperationLog, cooperationsApi, cooperationLogApi, CooperationLog, operationsApi, Operation, partsApi, phasesApi, PhaseInfo } from '../services/api'
 import { PartDetailContent } from './PartDetailPage'
 
 // ─── OP colours ───────────────────────────────────────────────────────────────
@@ -34,8 +34,8 @@ const HOME_OP_ID: Record<string, number> = Object.fromEntries(
 
 // phase_id → kolor; null/brak → 'r' gdy jest czas (domyślnie Oczekuje)
 const PHASE_COLOR: Record<number, OpState> = { 16: 'r', 17: 'o', 18: 'g' }
-// cykl kolorów: czerwony → zielony → pomarańczowy → zielony → (od nowa) czerwony
-const COLOR_CYCLE: Record<string, OpState> = { '': 'g', r: 'g', g: 'o', o: 'g2', g2: 'r' }
+// cykl kolorów: czerwony → pomarańczowy → zielony → czerwony
+const COLOR_CYCLE: Record<string, OpState> = { '': 'o', r: 'o', o: 'g', g: 'r', g2: 'r' }
 // kolor → phase_id do zapisu w DB (g i g2 to oba Wykonana = 18)
 const COLOR_PHASE: Record<string, number>  = { r: 16, o: 17, g: 18, g2: 18 }
 
@@ -67,7 +67,17 @@ interface Row {
   fcnc: string; fcnc_c: OpState; fcnc_robo: string; fcnc_robo_c: OpState
   slus: string; slus_c: OpState
   kop1: string; kop1_c: OpState; kop2: string; kop2_c: OpState; kop3: string; kop3_c: OpState
-  pozostaly_czas: string; data_zak: string
+  pozostaly_czas: string; phase_name: string
+}
+
+function calcIlosc(p: { quantity_right: number; quantity_left: number }): string {
+  if (p.quantity_right === 0) return String(p.quantity_left)
+  if (p.quantity_left  === 0) return String(p.quantity_right)
+  return `${p.quantity_right}+${p.quantity_left}`
+}
+
+function parseIlosc(s: string): number {
+  return s.split('+').reduce((sum, part) => sum + (parseFloat(part) || 0), 0)
 }
 
 function makeRow(
@@ -81,7 +91,7 @@ function makeRow(
     fkg:'', fkg_c:'', fko:'', fko_c:'',
     tok:'', tok_c:'', tokcnc:'', tokcnc_c:'',
     fcnc:'', fcnc_c:'', fcnc_robo:'', fcnc_robo_c:'', slus:'', slus_c:'',
-    kop1:'', kop1_c:'', kop2:'', kop2_c:'', kop3:'', kop3_c:'', pozostaly_czas:'', data_zak:'',
+    kop1:'', kop1_c:'', kop2:'', kop2_c:'', kop3:'', kop3_c:'', pozostaly_czas:'', phase_name:'',
   }
 }
 
@@ -89,22 +99,55 @@ const D6_PHASE_ID = 14
 const D7_PHASE_ID = 15
 const D8_PHASE_ID = 21
 
-/** Oblicza docelową fazę detalu na podstawie statusów operacji i kooperacji */
+const PHASE_LABELS: Record<string, string> = {
+  D4:   'Nie wydrukowano',
+  D6:   'Gotowe do Prod.',
+  D7:   'W trakcie Prod.',
+  D8:   'Czeka na Kop.',
+  D9:   'W trakcie Kop.',
+  D10:  'Skończony',
+  D11:  'Wyceniony',
+  D100: 'Anulowany',
+  D101: 'Wycofany',
+  D102: 'Wstrzymany',
+}
+
+/** Oblicza nazwę fazy detalu (D6-D10) na podstawie bieżących kolorów w wierszu */
+function computePhaseName(row: Row): string {
+  const cur = row.phase_name
+  if (cur === 'D11' || cur === 'D100' || cur === 'D101' || cur === 'D102') return cur
+
+  const rec = row as unknown as Record<string, string>
+
+  const timedOps    = TIMED_OP_KEYS.filter(k => !!rec[k])
+  const doneOps     = timedOps.filter(k => { const c = rec[`${k}_c`] as OpState; return c === 'g' || c === 'g2' })
+  const koops       = (['kop1','kop2','kop3'] as const).filter(k => !!rec[k])
+  const doneKoops   = koops.filter(k => { const c = rec[`${k}_c`] as OpState; return c === 'g' || c === 'g2' })
+  const inProgKoops = koops.filter(k => rec[`${k}_c`] === 'o')
+
+  if (timedOps.length > 0 && doneOps.length === timedOps.length) {
+    if (koops.length === 0 || doneKoops.length === koops.length)                               return 'D10'
+    if (inProgKoops.length > 0 || (doneKoops.length >= 1 && doneKoops.length < koops.length)) return 'D9'
+    return 'D8'
+  }
+
+  const hasStarted = timedOps.some(k => {
+    const c = rec[`${k}_c`] as OpState
+    return c === 'g' || c === 'g2' || c === 'o'
+  })
+  return hasStarted ? 'D7' : 'D6'
+}
+
+/** Oblicza docelową fazę detalu na podstawie statusów operacji */
 function computePartPhase(row: Row): number {
   const rec      = row as unknown as Record<string, string>
-  const allKeys  = [...TIMED_OP_KEYS, 'kop1', 'kop2', 'kop3']
-  let hasAnyFilled = false
-  let allGreen     = true
-  for (const k of allKeys) {
-    if (!rec[k]) continue
-    hasAnyFilled = true
-    const c = rec[`${k}_c`] as OpState
-    if (c !== 'g' && c !== 'g2') allGreen = false
-  }
-  if (hasAnyFilled && allGreen) return D8_PHASE_ID
+  const timedOps = TIMED_OP_KEYS.filter(k => !!rec[k])
+  const doneOps  = timedOps.filter(k => { const c = rec[`${k}_c`] as OpState; return c === 'g' || c === 'g2' })
 
-  const hasStartedOp = TIMED_OP_KEYS.some(k => {
-    if (!rec[k]) return false
+  // Wszystkie operacje skończone → minimum D8; D9/D10 ustawia backend
+  if (timedOps.length > 0 && doneOps.length === timedOps.length) return D8_PHASE_ID
+
+  const hasStartedOp = timedOps.some(k => {
     const c = rec[`${k}_c`] as OpState
     return c === 'g' || c === 'g2' || c === 'o'
   })
@@ -201,9 +244,10 @@ export default function HomePage() {
   const navigate   = useNavigate()
   const scrollRef  = useRef<HTMLDivElement>(null)
 
-  const [rows,       setRows]       = useState<Row[]>([])
-  const [operations, setOperations] = useState<Operation[]>([])
-  const [loading,    setLoading]    = useState(true)
+  const [rows,        setRows]       = useState<Row[]>([])
+  const [operations,  setOperations] = useState<Operation[]>([])
+  const [loading,     setLoading]    = useState(true)
+  const [refreshKey,  setRefreshKey] = useState(0)
   const [search,     setSearch]     = useState('')
   const [active,  setActive]  = useState<{ r: number; c: number } | null>(null)
 
@@ -216,16 +260,25 @@ export default function HomePage() {
   const [showFilterRow, setShowFilterRow] = useState(false)
   const filterInputRef = useRef<HTMLInputElement>(null)
 
+  const [partPhases,       setPartPhases]       = useState<PhaseInfo[]>([])
+  const [phaseFilter,      setPhaseFilter]      = useState<Set<string>>(() => new Set())
+  const [showPhaseFilter,  setShowPhaseFilter]  = useState(false)
+  const [phaseDropPos,     setPhaseDropPos]     = useState<{ top: number; right: number }>({ top: 0, right: 0 })
+  const phaseDropRef    = useRef<HTMLDivElement>(null)
+  const phaseDropBtnRef = useRef<HTMLSpanElement>(null)
+
   // ── Load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [orders, ops] = await Promise.all([
+        const [orders, ops, phases] = await Promise.all([
           ordersApi.getAll(),
           operationsApi.getAll().catch(() => [] as Operation[]),
+          phasesApi.getByType('part').catch(() => [] as PhaseInfo[]),
         ])
-        if (!cancelled) setOperations(ops)
+        if (!cancelled) { setOperations(ops); setPartPhases(phases) }
+        const phaseMap = new Map(phases.map(ph => [ph.id, ph.name]))
 
         // Pobierz detale zamówień ze statusem Z3 lub wyższym
         const d3Orders = orders.filter(o => o.phase_id !== null && o.phase_id >= 3)
@@ -239,12 +292,10 @@ export default function HomePage() {
           // termin z pierwszego detalu (wszystkie detale zamówienia mają ten sam termin)
           const orderDeadline = formatDate(parts[0]?.deadline_at ? String(parts[0].deadline_at) : null)
           for (const p of parts) {
-            entries.push({
-              partId: p.id,
-              row: makeRow(`${o.id}-${p.id}`, 0, p.id, o.order_number,
-                orderDeadline,
-                p.part_number, p.name, String(p.quantity_right ?? 0)),
-            })
+            const row = makeRow(`${o.id}-${p.id}`, 0, p.id, o.order_number,
+              orderDeadline, p.part_number, p.name, calcIlosc(p))
+            row.phase_name = phaseMap.get(p.phase_id ?? -1) ?? ''
+            entries.push({ partId: p.id, row })
           }
         }
 
@@ -292,7 +343,7 @@ export default function HomePage() {
       finally { if (!cancelled) setLoading(false) }
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [refreshKey])
 
   // ── Filter ────────────────────────────────────────────────────────────────
   const q = search.trim().toLowerCase()
@@ -307,7 +358,7 @@ export default function HomePage() {
   const COL_FIELDS_SORT: Array<keyof Row> = [
     'lp','numer_zlecenia','termin_wyk','numer_detalu','nazwa_detalu','ilosc',
     'pila','ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo','slus',
-    'kop1','kop2','kop3','pozostaly_czas','data_zak',
+    'kop1','kop2','kop3','pozostaly_czas','phase_name',
   ]
 
   // Filtrowanie kolumnowe (Lp.–Ilość = 0-5)
@@ -319,8 +370,12 @@ export default function HomePage() {
     return acc.filter(r => String(r[field] ?? '').toLowerCase().includes(v))
   }, filtered)
 
+  const phaseFiltered = phaseFilter.size === 0
+    ? colFiltered
+    : colFiltered.filter(r => phaseFilter.has(r.phase_name))
+
   const visible = sortCol !== null && sortDir !== null
-    ? [...colFiltered].sort((a, b) => {
+    ? [...phaseFiltered].sort((a, b) => {
         const field = COL_FIELDS_SORT[sortCol]
         const va = String(a[field] ?? '')
         const vb = String(b[field] ?? '')
@@ -330,7 +385,7 @@ export default function HomePage() {
           : va.localeCompare(vb, 'pl', { numeric: true })
         return sortDir === 'asc' ? cmp : -cmp
       })
-    : colFiltered
+    : phaseFiltered
 
   const nRows = visible.length
 
@@ -338,6 +393,19 @@ export default function HomePage() {
   useEffect(() => {
     if (showFilterRow) setTimeout(() => filterInputRef.current?.focus(), 0)
   }, [showFilterRow, filterCol])
+
+  // Zamknij dropdown fazy po kliknięciu poza nim
+  useEffect(() => {
+    if (!showPhaseFilter) return
+    const handle = (e: MouseEvent) => {
+      if (!phaseDropRef.current?.contains(e.target as Node) &&
+          !phaseDropBtnRef.current?.contains(e.target as Node)) {
+        setShowPhaseFilter(false)
+      }
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [showPhaseFilter])
 
   const toggleSort = (col: number, e: React.MouseEvent) => {
     if (!SORTABLE.has(col)) return
@@ -356,7 +424,7 @@ export default function HomePage() {
   const COL_FIELDS: Array<keyof Row> = [
     'lp','numer_zlecenia','termin_wyk','numer_detalu','nazwa_detalu','ilosc',
     'pila','ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo','slus',
-    'kop1','kop2','kop3','pozostaly_czas','data_zak',
+    'kop1','kop2','kop3','pozostaly_czas','phase_name',
   ]
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -389,7 +457,7 @@ export default function HomePage() {
               setRows(prev => prev.map(ro => {
                 if (ro._key !== row._key) return ro
                 const updated = { ...ro, [`${k}_c`]: newClr }
-                return { ...updated, pozostaly_czas: calcPozostaly(updated) }
+                return { ...updated, pozostaly_czas: calcPozostaly(updated), phase_name: computePhaseName(updated) }
               }))
               operationLogsApi.updatePhase(row.part_id, opId, COLOR_PHASE[newClr]).catch(console.error)
               partsApi.updatePhase(row.part_id, computePartPhase({ ...row, [`${k}_c`]: newClr })).catch(console.error)
@@ -405,11 +473,12 @@ export default function HomePage() {
             const clr    = row[`${f}_c` as keyof Row] as OpState
             const newClr = COLOR_CYCLE[clr || 'r']
             const slot   = kopIdx + 1
-            setRows(prev => prev.map(ro =>
-              ro._key === row._key ? { ...ro, [`${f}_c`]: newClr } : ro
-            ))
+            setRows(prev => prev.map(ro => {
+              if (ro._key !== row._key) return ro
+              const updated = { ...ro, [`${f}_c`]: newClr }
+              return { ...updated, phase_name: computePhaseName(updated) }
+            }))
             cooperationLogApi.updatePhase(row.part_id, slot, COLOR_PHASE[newClr]).catch(console.error)
-            partsApi.updatePhase(row.part_id, computePartPhase({ ...row, [`${f}_c`]: newClr })).catch(console.error)
           }
         }
         break
@@ -453,7 +522,7 @@ export default function HomePage() {
       // tylko czerwony (Oczekuje) i pomarańczowy (W realizacji)
       if (clr !== 'r' && clr !== 'o') return acc
       const v   = parseFloat(rec[field] || '0')
-      const qty = parseFloat(r.ilosc || '1')
+      const qty = parseIlosc(r.ilosc || '1')
       return acc + (isNaN(v) ? 0 : isNaN(qty) ? v : v * qty)
     }, 0)
     return minutes / 60
@@ -616,16 +685,80 @@ export default function HomePage() {
                         </span>
                       </span>
                     </th>
-                    <th
-                      style={{ ...thS(undefined, active?.c === 19), cursor:'pointer' }}
-                      onClick={e => toggleSort(19, e)}
-                    >
-                      <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
-                        Status
-                        <span style={{ fontSize:10, opacity: sortCol === 19 ? 1 : 0.4, color: sortCol === 19 ? '#2563eb' : 'inherit' }}>
-                          {sortCol === 19 ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                    <th style={{ ...thS(undefined, active?.c === 19), overflow:'visible' }}>
+                      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
+                        <span
+                          style={{ display:'flex', alignItems:'center', gap:4, cursor:'pointer' }}
+                          onClick={e => toggleSort(19, e)}
+                        >
+                          Status
+                          <span style={{ fontSize:10, opacity: sortCol === 19 ? 1 : 0.4, color: sortCol === 19 ? '#2563eb' : 'inherit' }}>
+                            {sortCol === 19 ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                          </span>
                         </span>
-                      </span>
+                        <span
+                          ref={phaseDropBtnRef}
+                          title="Filtruj status"
+                          onClick={e => {
+                            e.stopPropagation()
+                            setShowPhaseFilter(v => {
+                              if (!v && phaseDropBtnRef.current) {
+                                const r = phaseDropBtnRef.current.getBoundingClientRect()
+                                setPhaseDropPos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+                              }
+                              return !v
+                            })
+                          }}
+                          style={{
+                            display:'inline-flex', alignItems:'center', justifyContent:'center',
+                            padding:'1px 3px', borderRadius:3,
+                            background: phaseFilter.size > 0 ? '#2563eb' : 'transparent',
+                            color: phaseFilter.size > 0 ? '#fff' : '#94a3b8',
+                            fontSize:10, lineHeight:1, cursor:'pointer', flexShrink:0,
+                          }}
+                        >▽</span>
+                      </div>
+                      {showPhaseFilter && (() => {
+                        const opts = partPhases
+                          .filter(p => /^D\d+$/.test(p.name) && [4,6,7,8,9,10,11,100,101,102].includes(parseInt(p.name.slice(1))))
+                          .sort((a, b) => parseInt(a.name.slice(1)) - parseInt(b.name.slice(1)))
+                        return (
+                          <div ref={phaseDropRef} style={{
+                            position:'fixed', top: phaseDropPos.top, right: phaseDropPos.right,
+                            zIndex:1000, background:'#fff',
+                            border:'1px solid #d1d5db', borderRadius:6,
+                            boxShadow:'0 4px 12px rgba(0,0,0,.14)',
+                            minWidth:140, padding:'4px 0', textAlign:'left',
+                          }}>
+                            {opts.map(ph => (
+                              <label key={ph.id} style={{
+                                display:'flex', alignItems:'center', gap:8,
+                                padding:'5px 12px', cursor:'pointer', fontSize:13,
+                                color:'#111827', whiteSpace:'nowrap', fontWeight:400,
+                              }}>
+                                <input
+                                  type="checkbox"
+                                  checked={phaseFilter.has(ph.name)}
+                                  onChange={() => setPhaseFilter(prev => {
+                                    const s = new Set(prev)
+                                    if (s.has(ph.name)) s.delete(ph.name); else s.add(ph.name)
+                                    return s
+                                  })}
+                                />
+                                {PHASE_LABELS[ph.name] ?? ph.name}
+                              </label>
+                            ))}
+                            {phaseFilter.size > 0 && (
+                              <div style={{ borderTop:'1px solid #e5e7eb', padding:'4px 12px 2px' }}>
+                                <button
+                                  onClick={() => { setPhaseFilter(new Set()); setShowPhaseFilter(false) }}
+                                  style={{ fontSize:11, color:'#6b7280', background:'none', border:'none', cursor:'pointer', padding:0 }}
+                                >Wyczyść</button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </th>
                   </tr>
 
@@ -708,7 +841,7 @@ export default function HomePage() {
                                 setRows(prev => prev.map(r => {
                                   if (r._key !== row._key) return r
                                   const updated = { ...r, [`${k}_c`]: newClr }
-                                  return { ...updated, pozostaly_czas: calcPozostaly(updated) }
+                                  return { ...updated, pozostaly_czas: calcPozostaly(updated), phase_name: computePhaseName(updated) }
                                 }))
                                 operationLogsApi.updatePhase(row.part_id, opId, COLOR_PHASE[newClr]).catch(console.error)
                                 partsApi.updatePhase(row.part_id, computePartPhase({ ...row, [`${k}_c`]: newClr })).catch(console.error)
@@ -738,20 +871,23 @@ export default function HomePage() {
                               onDoubleClick={() => {
                                 if (!val) return
                                 const newClr = COLOR_CYCLE[clr || 'r']
-                                setRows(prev => prev.map(ro =>
-                                  ro._key === row._key ? { ...ro, [`${f}_c`]: newClr } : ro
-                                ))
+                                setRows(prev => prev.map(ro => {
+                                  if (ro._key !== row._key) return ro
+                                  const updated = { ...ro, [`${f}_c`]: newClr }
+                                  return { ...updated, phase_name: computePhaseName(updated) }
+                                }))
                                 cooperationLogApi.updatePhase(row.part_id, slot, COLOR_PHASE[newClr]).catch(console.error)
-                                partsApi.updatePhase(row.part_id, computePartPhase({ ...row, [`${f}_c`]: newClr })).catch(console.error)
                               }}
                             >
                               {val}
                             </td>
                           )
                         })}
-                        {(['pozostaly_czas','data_zak'] as Array<keyof Row>).map((f, i) => {
-                          const ci = 18 + i
-                          return <td key={String(f)} style={tdS(ca(ci), bg(ci))} {...act(ci)}>{row[f] as string}</td>
+                        {(['pozostaly_czas','phase_name'] as Array<keyof Row>).map((f, i) => {
+                          const ci  = 18 + i
+                          const val = row[f] as string
+                          const disp = f === 'phase_name' ? (PHASE_LABELS[val] ?? val) : val
+                          return <td key={String(f)} style={tdS(ca(ci), bg(ci))} {...act(ci)}>{disp}</td>
                         })}
                       </tr>
                     )
@@ -768,7 +904,14 @@ export default function HomePage() {
         <div style={{ position: 'fixed', top: 0, left: 56, right: 0, bottom: 0, zIndex: 300, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <PartDetailContent
             part_id={detailPartId}
-            onClose={() => setDetailPartId(null)}
+            onClose={() => { setDetailPartId(null); setRefreshKey(k => k + 1) }}
+            onOperationTimeUpdated={(partId, operationId, time) => {
+              const colKey = HOME_OP_MAP[operationId]
+              if (!colKey) return
+              setRows(prev => prev.map(row =>
+                row.part_id !== partId ? row : { ...row, [colKey]: time != null ? String(time) : '' } as typeof row
+              ))
+            }}
           />
         </div>
       )}

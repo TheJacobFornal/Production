@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ordersApi } from '../services/api'
 import { OrderListItem } from '../types'
@@ -44,6 +44,26 @@ function SortIcon({ col, sortCol, sortDir }: { col: SortCol; sortCol: SortCol | 
   )
 }
 
+// ─── Etykiety faz zamówienia ──────────────────────────────────────────────────
+
+const PHASE_LABELS: Record<string, string> = {
+  Z2: 'Nowe',
+  Z3: 'Zaplanowane',
+  Z4: 'Gotowe do produkcji',
+  Z5: 'W produkcji',
+  Z6: 'Wyprodukowane',
+  Z7: 'Wycenione',
+}
+
+const PHASE_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
+  Z2: { bg: '#f1f5f9', text: '#475569', dot: '#94a3b8' },
+  Z3: { bg: '#fef9c3', text: '#854d0e', dot: '#eab308' },
+  Z4: { bg: '#dbeafe', text: '#1d4ed8', dot: '#3b82f6' },
+  Z5: { bg: '#ffedd5', text: '#c2410c', dot: '#f97316' },
+  Z6: { bg: '#dcfce7', text: '#15803d', dot: '#22c55e' },
+  Z7: { bg: '#f3e8ff', text: '#7e22ce', dot: '#a855f7' },
+}
+
 // ─── Input filtra ─────────────────────────────────────────────────────────────
 
 const filterInput: React.CSSProperties = {
@@ -62,12 +82,18 @@ export default function OrdersPage() {
   const [error,   setError]   = useState<string | null>(null)
 
   // Filtry per kolumna
-  const [showFilters, setShowFilters] = useState(false)
-  const [fNumer,   setFNumer]   = useState('')
-  const [fTermin,  setFTermin]  = useState('')
-  const [fLiczba,  setFLiczba]  = useState('')
+  const [showFilters,  setShowFilters]  = useState(false)
+  const [fNumer,       setFNumer]       = useState('')
+  const [fTermin,      setFTermin]      = useState('')
+  const [fLiczba,      setFLiczba]      = useState('')
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set())
+  const [showStatusDrop, setShowStatusDrop] = useState(false)
+  const [statusDropPos,  setStatusDropPos]  = useState({ top: 0, left: 0, width: 0 })
 
-  const hasActiveFilter = fNumer || fTermin || fLiczba
+  const statusDropRef    = useRef<HTMLDivElement>(null)
+  const statusDropBtnRef = useRef<HTMLTableCellElement>(null)
+
+  const hasActiveFilter = fNumer || fTermin || fLiczba || statusFilter.size > 0
 
   // Sortowanie
   const [sortCol, setSortCol] = useState<SortCol | null>(null)
@@ -80,16 +106,45 @@ export default function OrdersPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Zamknij dropdown po kliknięciu poza
+  useEffect(() => {
+    if (!showStatusDrop) return
+    const handler = (e: MouseEvent) => {
+      if (
+        statusDropRef.current && !statusDropRef.current.contains(e.target as Node) &&
+        statusDropBtnRef.current && !statusDropBtnRef.current.contains(e.target as Node)
+      ) setShowStatusDrop(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showStatusDrop])
+
+  const allStatuses = useMemo(() =>
+    Array.from(new Set(
+      orders.map(o => o.phase_name ? (PHASE_LABELS[o.phase_name] ?? o.phase_name) : null)
+            .filter(Boolean) as string[]
+    )).sort()
+  , [orders])
+
   const toggleSort = (col: SortCol) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const toggleStatus = (s: string) => {
+    setStatusFilter(prev => {
+      const next = new Set(prev)
+      next.has(s) ? next.delete(s) : next.add(s)
+      return next
+    })
   }
 
   const display = useMemo(() => {
     let list = orders.filter(o =>
       o.order_number.toLowerCase().includes(fNumer.toLowerCase()) &&
       formatDate(o.deadline_at).includes(fTermin) &&
-      String(o.parts_count).includes(fLiczba)
+      String(o.parts_count).includes(fLiczba) &&
+      (statusFilter.size === 0 || statusFilter.has(PHASE_LABELS[o.phase_name ?? ''] ?? o.phase_name ?? ''))
     )
 
     if (sortCol) {
@@ -109,7 +164,7 @@ export default function OrdersPage() {
       })
     }
     return list
-  }, [orders, fNumer, fTermin, fLiczba, sortCol, sortDir])
+  }, [orders, fNumer, fTermin, fLiczba, statusFilter, sortCol, sortDir])
 
   const thStyle: React.CSSProperties = {
     padding: '8px 12px', textAlign: 'center', cursor: 'pointer',
@@ -164,6 +219,30 @@ export default function OrdersPage() {
                     </span>
                   </th>
                 ))}
+
+                {/* ── Kolumna Status z dropdownem ── */}
+                <th
+                  ref={statusDropBtnRef}
+                  className="border border-gray-300"
+                  style={{ ...thStyle, cursor: 'pointer' }}
+                  onClick={e => {
+                    e.stopPropagation()
+                    const rect = statusDropBtnRef.current!.getBoundingClientRect()
+                    setStatusDropPos({ top: rect.bottom + 2, left: rect.left + rect.width / 2, width: rect.width })
+                    setShowStatusDrop(v => !v)
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                    <span>Status</span>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      padding: '1px 4px', borderRadius: 3,
+                      background: statusFilter.size > 0 ? '#2563eb' : 'transparent',
+                      color: statusFilter.size > 0 ? '#fff' : '#93c5fd',
+                      fontSize: 10, lineHeight: 1,
+                    }}>▽</span>
+                  </span>
+                </th>
               </tr>
 
               {/* ── Wiersz filtrów ── */}
@@ -179,17 +258,24 @@ export default function OrdersPage() {
                   <input style={filterInput} placeholder="Szukaj..." value={fLiczba} onChange={e => setFLiczba(e.target.value)} onKeyDown={e => e.key === 'Enter' && setShowFilters(false)} />
                 </td>
                 <td className="border border-gray-300 px-1 py-1" />
+                <td className="border border-gray-300 px-1 py-1" />
               </tr>}
             </thead>
 
             <tbody>
               {display.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-6 text-gray-400">Brak zamówień</td>
+                  <td colSpan={6} className="text-center py-6 text-gray-400">Brak zamówień</td>
                 </tr>
               ) : (
-                display.map((order, i) => (
-                  <tr key={order.order_number} className="hover:bg-blue-50 cursor-pointer"
+                display.map((order, i) => {
+                  const hasMissing = order.missing_drawings_count > 0
+                  return (
+                  <tr key={order.order_number}
+                    style={{ background: hasMissing ? '#fff7ed' : undefined }}
+                    className="cursor-pointer"
+                    onMouseEnter={e => (e.currentTarget.style.background = hasMissing ? '#fed7aa' : '#eff6ff')}
+                    onMouseLeave={e => (e.currentTarget.style.background = hasMissing ? '#fff7ed' : '')}
                     onClick={() => navigate(`/orders/${encodeURIComponent(order.order_number)}`)}>
                     <td className="border border-gray-300 px-3 py-2 text-center">{i + 1}</td>
                     <td className="border border-gray-300 px-3 py-2 text-center font-medium text-blue-600 hover:underline">
@@ -202,15 +288,90 @@ export default function OrdersPage() {
                       {order.parts_count}
                     </td>
                     <td className="border border-gray-300 px-3 py-2">
-                      <ProgressBar completed={order.completed_count} total={order.parts_count} />
+                      {order.phase_name === 'Z5'
+                        ? <ProgressBar completed={order.d10_count} total={order.parts_count} />
+                        : <ProgressBar completed={order.completed_count} total={order.parts_count} />
+                      }
+                    </td>
+                    <td className="border border-gray-300 px-3 py-2 text-center">
+                      {order.phase_name && (() => {
+                        const label  = PHASE_LABELS[order.phase_name] ?? order.phase_name
+                        const colors = PHASE_COLORS[order.phase_name]
+                        return colors ? (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                            padding: '3px 10px', borderRadius: 20,
+                            background: colors.bg, color: colors.text,
+                            fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
+                          }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.dot, flexShrink: 0 }} />
+                            {label}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 12, color: '#374151' }}>{label}</span>
+                        )
+                      })()}
                     </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>
         )}
       </div>
+
+      {/* ── Dropdown statusów (fixed, poza scroll) ── */}
+      {showStatusDrop && (
+        <div
+          ref={statusDropRef}
+          style={{
+            position: 'fixed', top: statusDropPos.top, left: statusDropPos.left,
+            transform: 'translateX(-50%)',
+            width: Math.max(statusDropPos.width, 160),
+            background: '#fff', border: '1px solid #d1d5db', borderRadius: 6,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 1000,
+            padding: '6px 0',
+          }}
+        >
+          {statusFilter.size > 0 && (
+            <div
+              onClick={() => setStatusFilter(new Set())}
+              style={{ padding: '4px 12px', fontSize: 11, color: '#6b7280', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
+            >
+              Wyczyść filtr
+            </div>
+          )}
+          {allStatuses.length === 0 && (
+            <div style={{ padding: '6px 12px', fontSize: 12, color: '#9ca3af' }}>Brak statusów</div>
+          )}
+          {allStatuses.map(s => (
+            <label
+              key={s}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '5px 12px', cursor: 'pointer', fontSize: 13,
+                background: statusFilter.has(s) ? '#eff6ff' : 'transparent',
+              }}
+              onClick={e => { e.stopPropagation(); toggleStatus(s) }}
+            >
+              <input
+                type="checkbox"
+                readOnly
+                checked={statusFilter.has(s)}
+                style={{ accentColor: '#2563eb', width: 14, height: 14, flexShrink: 0 }}
+              />
+              <span style={{
+                display: 'inline-block', padding: '1px 7px', borderRadius: 4,
+                background: '#dbeafe', color: '#1e40af',
+                fontSize: 11, fontWeight: 700,
+              }}>
+                {s}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

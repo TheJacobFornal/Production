@@ -53,6 +53,60 @@ class CommercialRepository {
     `)
     return result.recordset.map((r: { part_id: number }) => r.part_id)
   }
+
+  /** Zwraca wszystkie detale z flagą commercial wraz z danymi zamówienia */
+  async getAllParts() {
+    const db = await getDb()
+    const result = await db.request().query(`
+      SELECT
+        c.id             AS commercial_id,
+        fl.part_id,
+        o.order_number   AS numer_zlecenia,
+        p.part_number    AS nr_detalu,
+        p.quantity_right AS ilosc,
+        c.ordered_at     AS data_zamowienia,
+        c.arrived_at     AS data_dostawy,
+        CASE
+          WHEN c.arrived_at IS NOT NULL THEN 2
+          WHEN c.ordered_at IS NOT NULL THEN 1
+          ELSE 0
+        END              AS status_num
+      FROM  [commercial] c
+      JOIN  [form_log]   fl ON fl.id = c.form_id
+      JOIN  [part]       p  ON p.id  = fl.part_id
+      JOIN  [order]      o  ON o.id  = p.order_id
+      ORDER BY o.order_number, p.part_number
+    `)
+    return result.recordset
+  }
+
+  /** Aktualizuje status (ordered_at / arrived_at) rekordu commercial */
+  async updateStatus(commercialId: number, status: 'Do zamówienia' | 'Zamówione' | 'Dotarło'): Promise<void> {
+    const db = await getDb()
+    const req = db.request().input('id', sql.Int, commercialId)
+    if (status === 'Do zamówienia') {
+      await req.query(`UPDATE [commercial] SET ordered_at = NULL, arrived_at = NULL WHERE id = @id`)
+    } else if (status === 'Zamówione') {
+      await req.query(`UPDATE [commercial] SET ordered_at = GETDATE(), arrived_at = NULL WHERE id = @id`)
+    } else {
+      await req.query(`UPDATE [commercial] SET arrived_at = GETDATE() WHERE id = @id`)
+    }
+  }
+
+  /** Aktualizuje daty ręcznie wpisane przez użytkownika */
+  async updateDates(commercialId: number, orderedAt: string | null, arrivedAt: string | null): Promise<void> {
+    const db = await getDb()
+    await db.request()
+      .input('id',         sql.Int,      commercialId)
+      .input('orderedAt',  sql.DateTime, orderedAt ? new Date(orderedAt) : null)
+      .input('arrivedAt',  sql.DateTime, arrivedAt ? new Date(arrivedAt) : null)
+      .query(`
+        UPDATE [commercial]
+        SET ordered_at = @orderedAt,
+            arrived_at = @arrivedAt
+        WHERE id = @id
+      `)
+  }
 }
 
 export const commercialRepository = new CommercialRepository()

@@ -43,4 +43,43 @@ router.get('/', async (req, res) => {
   }
 })
 
+// GET /api/commercial/parts  → wszystkie detale z commercial=true + dane zamówienia
+router.get('/parts', async (_req, res) => {
+  try {
+    const parts = await commercialRepository.getAllParts()
+    res.json(parts)
+  } catch (err) {
+    console.error('commercial GET /parts error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// PATCH /api/commercial/:id/dates  → ręczna zmiana dat
+router.patch('/:id/dates', async (req, res) => {
+  try {
+    const id = Number(req.params.id)
+    const { ordered_at, arrived_at } = req.body as { ordered_at: string | null; arrived_at: string | null }
+    if (!id) return res.status(400).json({ message: 'id wymagane' })
+    await commercialRepository.updateDates(id, ordered_at ?? null, arrived_at ?? null)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('commercial PATCH dates error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// PATCH /api/commercial/:id/status  → aktualizuj status (ordered_at / arrived_at)
+router.patch('/:id/status', async (req, res) => {
+  try {
+    const id = Number(req.params.id)
+    const { status } = req.body as { status: 'Do zamówienia' | 'Zamówione' | 'Dotarło' }
+    if (!id || !status) return res.status(400).json({ message: 'id i status wymagane' })
+    await commercialRepository.updateStatus(id, status)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('commercial PATCH status error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
 export default router

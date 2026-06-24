@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ordersApi, operationLogsApi, OperationLog, formLogApi, FormLogDims, cooperationsApi, Cooperation, cooperationLogApi, CooperationLog, commercialApi, partsApi, PartSearchResult, materialsApi, Material } from '../services/api'
+import { ordersApi, operationLogsApi, OperationLog, formLogApi, FormLogDims, cooperationsApi, Cooperation, cooperationLogApi, CooperationLog, commercialApi, partsApi, PartSearchResult, PartPaths, materialsApi, Material, dialogApi } from '../services/api'
 import { Part } from '../types'
+import { loadSettings } from './SettingsPage'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,13 @@ const COLS: ColDef[] = [
   { key: 'przerobka',  label: 'Przer.',      group: 'inne', width: 62 },
 ]
 
+// ─── Kolumny z sortowaniem / filtrowaniem ─────────────────────────────────────
+
+const SORTABLE_COLS   = new Set(['numer_zlecenia','termin_wyk','numer_detalu','nazwa_detalu','ilosc',
+  'ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo','suma_czasu','col_a','col_b','col_c','material'])
+const FILTERABLE_COLS = new Set(['numer_zlecenia','termin_wyk','numer_detalu','nazwa_detalu','ilosc','material'])
+const NUMERIC_SORT    = new Set(['ilosc','ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo','col_a','col_b','col_c'])
+
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
 const _WS     = COLS.filter(c => c.stickyIdx !== undefined).map(c => c.width)
@@ -149,15 +157,42 @@ function formatDate(s: string | null | undefined): string {
   return d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+// done: true = ✓ zielony | false = ✗ czerwony | null = ⟳ ładowanie | 'na' = — szary
+function CheckItem({ label, done, note }: { label: string; done: boolean | 'na' | null; note?: string }) {
+  const loading = done === null
+  const icon    = loading ? '⟳' : done === true ? '✓' : done === 'na' ? '–' : '✗'
+  const bg      = loading ? '#cbd5e1' : done === true ? '#22c55e' : done === 'na' ? '#94a3b8' : '#ef4444'
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '11px 0', borderBottom: '1px solid #f1f5f9' }}>
+      <div style={{
+        width: 22, height: 22, borderRadius: '50%', flexShrink: 0, marginTop: 1,
+        background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#fff', fontSize: 11, fontWeight: 800,
+        animation: loading ? 'spin 0.9s linear infinite' : 'none',
+      }}>{icon}</div>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>{label}</div>
+        {note && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{note}</div>}
+      </div>
+    </div>
+  )
+}
+
 function stickyBase(col: ColDef, bg: string): React.CSSProperties {
   if (col.stickyIdx === undefined) return {}
   return { position: 'sticky', left: WS_LEFT[col.stickyIdx], zIndex: 2, background: bg }
 }
 
+function calcIlosc(p: Part): string {
+  if (p.quantity_right === 0) return String(p.quantity_left)
+  if (p.quantity_left  === 0) return String(p.quantity_right)
+  return `${p.quantity_right}+${p.quantity_left}`
+}
+
 function partToRow(p: Part, orderNumber: string, termin: string): Row {
   return {
     id: p.id, numer_zlecenia: orderNumber, termin_wyk: termin,
-    numer_detalu: p.part_number, nazwa_detalu: p.name, ilosc: String(p.quantity_right),
+    numer_detalu: p.part_number, nazwa_detalu: p.name, ilosc: calcIlosc(p),
     ploter: '', ploter_seq: '', fkg: '', fkg_seq: '', fko: '', fko_seq: '',
     tok: '', tok_seq: '', tokcnc: '', tokcnc_seq: '', fcnc: '', fcnc_seq: '', fcnc_robo: '', fcnc_robo_seq: '',
     col_a: '', col_b: '', col_c: '',
@@ -502,6 +537,57 @@ export default function OrderProductionPage() {
   const [cooperations, setCooperations] = useState<Cooperation[]>([])
   const [materials,    setMaterials]    = useState<Material[]>([])
   const [orderId,      setOrderId]      = useState<number | null>(null)
+  const [partPaths,    setPartPaths]    = useState<Map<number, PartPaths>>(new Map())
+  const [newRow,       setNewRow]       = useState({ numer_detalu: '', nazwa_detalu: '', ilosc: '1', termin_wyk: '' })
+  const [newRowSaving, setNewRowSaving] = useState(false)
+  const [sortCol,       setSortCol]       = useState<string | null>(null)
+  const [sortDir,       setSortDir]       = useState<'asc' | 'desc' | null>(null)
+  const [colFilters,    setColFilters]    = useState<Record<string, string>>({})
+  const [filterCol,     setFilterCol]     = useState<string | null>(null)
+  const [showFilterRow, setShowFilterRow] = useState(false)
+  const filterInputRef = useRef<HTMLInputElement>(null)
+
+  const filteredRows = useMemo(() => {
+    const activeFilters = Object.entries(colFilters).filter(([, v]) => v.trim())
+    let result: Row[] = activeFilters.length
+      ? rows.filter(row => {
+          const rec = row as unknown as Record<string, unknown>
+          return activeFilters.every(([key, val]) =>
+            String(rec[key] ?? '').toLowerCase().includes(val.toLowerCase())
+          )
+        })
+      : rows
+    if (sortCol && sortDir) {
+      result = [...result].sort((a, b) => {
+        const ra = a as unknown as Record<string, string>
+        const rb = b as unknown as Record<string, string>
+        if (sortCol === 'suma_czasu') {
+          const cmp = sumRow(a) - sumRow(b)
+          return sortDir === 'asc' ? cmp : -cmp
+        }
+        const va = ra[sortCol] ?? ''; const vb = rb[sortCol] ?? ''
+        const cmp = NUMERIC_SORT.has(sortCol)
+          ? (parseFloat(va) || 0) - (parseFloat(vb) || 0)
+          : va.localeCompare(vb, 'pl', { numeric: true })
+        return sortDir === 'asc' ? cmp : -cmp
+      })
+    }
+    return result
+  }, [rows, colFilters, sortCol, sortDir])
+
+  // Wybrany folder
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
+  const [loadingFiles,   setLoadingFiles]   = useState(false)
+  const [fileMsg,        setFileMsg]        = useState<{ text: string; ok: boolean } | null>(null)
+
+  // Modal "Gotowe do produkcji"
+  const [readyModal, setReadyModal] = useState<{
+    running:      boolean
+    pdfOk:        boolean | null
+    printEnabled: boolean
+    printOk:      boolean | null
+    errors:       string[]
+  } | null>(null)
 
   // Przeróbka modal
   const [przerobkaIdx,    setPrzerobkaIdx]    = useState<number | null>(null)
@@ -509,6 +595,23 @@ export default function OrderProductionPage() {
   const [searchResults,    setSearchResults]    = useState<PartSearchResult[]>([])
 
   const containerRef = useRef<HTMLDivElement>(null)
+
+  const toggleSort = (key: string, e: React.MouseEvent) => {
+    if (!SORTABLE_COLS.has(key)) return
+    e.stopPropagation()
+    if (sortCol === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(key); setSortDir('asc') }
+  }
+
+  const openFilter = (key: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setFilterCol(key)
+    setShowFilterRow(v => !v || filterCol !== key)
+  }
+
+  useEffect(() => {
+    if (showFilterRow) setTimeout(() => filterInputRef.current?.focus(), 0)
+  }, [showFilterRow, filterCol])
 
   /** Synchronizuje etap detalu: ≥1 czas operacji i ≥2 wymiary → D3, inaczej → D2 */
   const syncPhase = useCallback((partId: number) => {
@@ -615,6 +718,15 @@ export default function OrderProductionPage() {
           })
 
           setRows(baseRows)
+
+          partsApi.getPaths(partIds).then(paths => {
+            setPartPaths(new Map(paths.map(p => [p.part_id, p])))
+            const firstFile = paths.flatMap(p => [p.PDF_path, p.DWG_path, p.STP_path]).find(Boolean)
+            if (firstFile) {
+              const dir = firstFile.replace(/[/\\][^/\\]+$/, '')
+              setSelectedFolder(dir)
+            }
+          }).catch(console.error)
         })
       })
       .catch(err => setError(err.message))
@@ -640,50 +752,49 @@ export default function OrderProductionPage() {
   }, [active])
 
   // ── Mutations ─────────────────────────────────────────────────────────────
-  const updateCell = useCallback((ri: number, key: string, val: string) =>
-    setRows(prev => prev.map((row, i) => i === ri ? { ...row, [key]: val } : row)), [])
+  const updateCell = useCallback((rowId: number, key: string, val: string) =>
+    setRows(prev => prev.map(row => row.id === rowId ? { ...row, [key]: val } : row)), [])
 
   const toggleCheckbox = useCallback((ri: number, key: 'handlowka') => {
-    const wasOff = !rows[ri][key]
-    setRows(prev => prev.map((row, i) => i === ri ? { ...row, [key]: !row[key] } : row))
+    const rowId  = filteredRows[ri].id
+    const wasOff = !filteredRows[ri][key]
+    setRows(prev => prev.map(row => row.id === rowId ? { ...row, [key]: !row[key] } : row))
     setActive({ r: ri, c: COLS.findIndex(c => c.key === key) })
-    const partId = rows[ri].id
-    if (wasOff) commercialApi.create(partId).catch(console.error)
-    else        commercialApi.delete(partId).catch(console.error)
-  }, [rows])
+    if (wasOff) commercialApi.create(rowId).catch(console.error)
+    else        commercialApi.delete(rowId).catch(console.error)
+  }, [filteredRows])
 
   const openPrzerobkaModal = useCallback((ri: number) => {
-    const row = rows[ri]
-    setSelectedParentId(row.rework_parent_part_id)
+    const fRow = filteredRows[ri]
+    setSelectedParentId(fRow.rework_parent_part_id)
     setSearchResults([])
-    setRows(prev => prev.map((r, i) =>
-      i === ri ? { ...r, oryginalny_detal: r.numer_detalu } : r
-    ))
+    setRows(prev => prev.map(r => r.id === fRow.id ? { ...r, oryginalny_detal: r.numer_detalu } : r))
     setActive({ r: ri, c: COLS.findIndex(c => c.key === 'przerobka') })
     setPrzerobkaIdx(ri)
-  }, [rows])
+  }, [filteredRows])
 
   // ── Navigation ────────────────────────────────────────────────────────────
   const moveTo = useCallback((r: number, c: number) => {
-    setActive({ r: Math.max(0, Math.min(rows.length - 1, r)), c: Math.max(0, Math.min(COLS.length - 1, c)) })
+    setActive({ r: Math.max(0, Math.min(filteredRows.length - 1, r)), c: Math.max(0, Math.min(COLS.length - 1, c)) })
     setEditing(null)
-  }, [rows.length])
+  }, [filteredRows.length])
 
   const startEditing = useCallback((r: number, c: number) => {
     if (COLS[c].readOnly || COLS[c].checkbox) return
     setActive({ r, c }); setEditing({ r, c })
   }, [])
 
-  const commitAndMove = useCallback((ri: number, ci: number, dr: number, dc: number, val: string, autoEdit = false) => {
-    updateCell(ri, COLS[ci].key, val); setEditing(null)
+  const commitAndMove = useCallback((rowId: number, ci: number, dr: number, dc: number, val: string, autoEdit = false) => {
+    updateCell(rowId, COLS[ci].key, val); setEditing(null)
     if (dr !== 0 || dc !== 0) {
-      const newR = Math.max(0, Math.min(rows.length - 1, ri + dr))
+      const curR = filteredRows.findIndex(r => r.id === rowId)
+      const newR = Math.max(0, Math.min(filteredRows.length - 1, curR + dr))
       const newC = Math.max(0, Math.min(COLS.length - 1, ci + dc))
       setActive({ r: newR, c: newC })
       if (autoEdit && !COLS[newC]?.readOnly && !COLS[newC]?.checkbox)
         setEditing({ r: newR, c: newC })
     }
-  }, [rows.length, updateCell])
+  }, [filteredRows, updateCell])
 
   const cancelEdit = useCallback(() => setEditing(null), [])
 
@@ -692,20 +803,22 @@ export default function OrderProductionPage() {
     const { r, c } = active
     const col = COLS[c]
 
+    const activeRow    = filteredRows[r]
+    const activeRowRec = activeRow as unknown as Record<string, string>
+
     // ── Ctrl+C — kopiuj wartość komórki ──────────────────────────────────────
     if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
       e.preventDefault()
-      const rowRec = rows[r] as unknown as Record<string, string>
       let value: string
       if (col.group === 'kooperacje') {
-        const coopId = rowRec[col.key] ?? ''
+        const coopId = activeRowRec[col.key] ?? ''
         value = cooperations.find(c => String(c.id) === coopId)?.name ?? ''
       } else if (col.checkbox) {
-        value = (rows[r] as unknown as Record<string, unknown>)[col.key] ? '1' : '0'
+        value = (activeRow as unknown as Record<string, unknown>)[col.key] ? '1' : '0'
       } else if (col.group === 'operacje') {
-        value = rowRec[col.key] ?? ''         // czas (bez seq)
+        value = activeRowRec[col.key] ?? ''
       } else {
-        value = getCellValue(col, rows[r], r + 1)
+        value = getCellValue(col, activeRow, r + 1)
       }
       navigator.clipboard.writeText(value).catch(console.error)
       return
@@ -728,28 +841,26 @@ export default function OrderProductionPage() {
         if (!col.readOnly && !col.checkbox) {
           e.preventDefault()
           if (col.group === 'operacje') {
-            updateCell(r, col.key + '_seq', '')
-            const rowRec = rows[r] as unknown as Record<string, string>
+            updateCell(activeRow.id, col.key + '_seq', '')
             operationLogsApi.save({
-              part_id:         rows[r].id,
+              part_id:         activeRow.id,
               operation_id:    OPERATION_MAP[col.key],
-              time_estimated:  rowRec[col.key] ? parseFloat(rowRec[col.key]) : null,
+              time_estimated:  activeRowRec[col.key] ? parseFloat(activeRowRec[col.key]) : null,
               operation_order: null,
               phase_id:        null,
             }).catch(console.error)
           } else if (col.group === 'kooperacje') {
-            updateCell(r, col.key, '')
-            cooperationLogApi.save({ part_id: rows[r].id, cooperation_id: null, slot: KOP_SLOT[col.key] }).catch(console.error)
+            updateCell(activeRow.id, col.key, '')
+            cooperationLogApi.save({ part_id: activeRow.id, cooperation_id: null, slot: KOP_SLOT[col.key] }).catch(console.error)
           } else {
-            updateCell(r, col.key, '')
+            updateCell(activeRow.id, col.key, '')
             if (col.key === 'col_a' || col.key === 'col_b' || col.key === 'col_c') {
-              const rowRec = rows[r] as unknown as Record<string, string>
               formLogApi.saveDims({
-                part_id:   rows[r].id,
-                dim_a_est: col.key === 'col_a' ? null : (rowRec['col_a'] ? parseFloat(rowRec['col_a']) : null),
-                dim_b_est: col.key === 'col_b' ? null : (rowRec['col_b'] ? parseFloat(rowRec['col_b']) : null),
-                dim_c_est: col.key === 'col_c' ? null : (rowRec['col_c'] ? parseFloat(rowRec['col_c']) : null),
-              }).then(() => syncPhase(rows[r].id))
+                part_id:   activeRow.id,
+                dim_a_est: col.key === 'col_a' ? null : (activeRowRec['col_a'] ? parseFloat(activeRowRec['col_a']) : null),
+                dim_b_est: col.key === 'col_b' ? null : (activeRowRec['col_b'] ? parseFloat(activeRowRec['col_b']) : null),
+                dim_c_est: col.key === 'col_c' ? null : (activeRowRec['col_c'] ? parseFloat(activeRowRec['col_c']) : null),
+              }).then(() => syncPhase(activeRow.id))
                 .catch(console.error)
             }
           }
@@ -758,7 +869,7 @@ export default function OrderProductionPage() {
       default:
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !col.readOnly && !col.checkbox) startEditing(r, c)
     }
-  }, [active, cooperations, editing, moveTo, openPrzerobkaModal, rows, startEditing, syncPhase, toggleCheckbox, updateCell])
+  }, [active, cooperations, editing, filteredRows, moveTo, openPrzerobkaModal, startEditing, syncPhase, toggleCheckbox, updateCell])
 
   // ── Zamknij modal (bez zmiany stanu detalu) ───────────────────────────────
   const closeModal = () => {
@@ -768,7 +879,7 @@ export default function OrderProductionPage() {
   }
 
   // ── Wyszukiwanie detali do przeróbki ──────────────────────────────────────
-  const searchQuery = przerobkaIdx !== null ? (rows[przerobkaIdx]?.oryginalny_detal ?? '') : ''
+  const searchQuery = przerobkaIdx !== null ? (filteredRows[przerobkaIdx]?.oryginalny_detal ?? '') : ''
   useEffect(() => {
     if (!searchQuery.trim()) { setSearchResults([]); return }
     const timer = setTimeout(() => {
@@ -779,7 +890,7 @@ export default function OrderProductionPage() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  const modalRow         = przerobkaIdx !== null ? rows[przerobkaIdx] : null
+  const modalRow         = przerobkaIdx !== null ? filteredRows[przerobkaIdx] : null
   const totalCzas        = rows.reduce((s, r) => s + sumRow(r), 0)
   const filteredMaterials    = materials.filter(m => m.density != null && m.cost != null)
   const filteredCooperations = cooperations.filter(c => c.price != null)
@@ -874,22 +985,49 @@ export default function OrderProductionPage() {
                   {COLS.map((col, ci) => {
                     const isOp = col.group === 'operacje'
                     if (!isOp) {
-                      // Kolumny poza operacjami: jeden wiersz z etykietą (rowSpan=2)
+                      const isSortable   = SORTABLE_COLS.has(col.key)
+                      const isFilterable = FILTERABLE_COLS.has(col.key)
+                      const hasFilter    = !!colFilters[col.key]?.trim()
                       return (
-                        <th key={col.key} rowSpan={2}
+                        <th key={col.key} rowSpan={showFilterRow ? 2 : 2}
                           style={{
                             ...thStyle(col, colWidths[ci], active?.c === ci, true),
                             ...(col.key === 'suma_czasu' ? {
                               background: active?.c === ci ? GROUP_BG_ACTIVE.operacje : GROUP_BG.operacje,
                               color: GROUP_TEXT.operacje,
                             } : {}),
-                          }}>
-                          {col.label}
+                            cursor: isSortable ? 'pointer' : 'default',
+                          }}
+                          onClick={isSortable ? e => toggleSort(col.key, e) : undefined}
+                        >
+                          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 2 }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 3, flex: 1, justifyContent: 'center' }}>
+                              {col.label}
+                              {isSortable && (
+                                <span style={{ fontSize: 9, opacity: sortCol === col.key ? 1 : 0.4, color: sortCol === col.key ? '#2563eb' : 'inherit' }}>
+                                  {sortCol === col.key ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                                </span>
+                              )}
+                            </span>
+                            {isFilterable && (
+                              <span
+                                title="Filtruj"
+                                onClick={e => openFilter(col.key, e)}
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  padding: '1px 3px', borderRadius: 3,
+                                  background: hasFilter ? '#2563eb' : 'transparent',
+                                  color: hasFilter ? '#fff' : '#94a3b8',
+                                  fontSize: 9, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
+                                }}
+                              >▽</span>
+                            )}
+                          </span>
                         </th>
                       )
                     }
                     // Operacje: wiersz 1 — suma
-                    const val = totalColValue(col, rows)
+                    const val = totalColValue(col, filteredRows)
                     return (
                       <th key={col.key} style={{
                         background: GROUP_BG.operacje, color: GROUP_TEXT.operacje,
@@ -918,10 +1056,48 @@ export default function OrderProductionPage() {
                   })}
                 </tr>
 
+                {/* ── Wiersz 3: filtry (gdy showFilterRow) ─────────────────── */}
+                {showFilterRow && (
+                  <tr>
+                    {COLS.map((col, ci) => {
+                      const stickyStyle: React.CSSProperties = col.stickyIdx !== undefined
+                        ? { position: 'sticky', left: WS_LEFT[col.stickyIdx], zIndex: 4 }
+                        : {}
+                      return (
+                        <td key={col.key} style={{
+                          ...stickyStyle,
+                          background: '#eff6ff',
+                          padding: 2, width: colWidths[ci], minWidth: colWidths[ci], maxWidth: colWidths[ci],
+                          borderTop: 'none', borderLeft: 'none', borderRight: BORDER, borderBottom: BORDER,
+                          boxSizing: 'border-box',
+                        }}>
+                          {FILTERABLE_COLS.has(col.key) && (
+                            <input
+                              ref={filterCol === col.key ? filterInputRef : null}
+                              value={colFilters[col.key] ?? ''}
+                              onChange={e => setColFilters(f => ({ ...f, [col.key]: e.target.value }))}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter')  setShowFilterRow(false)
+                                if (e.key === 'Escape') { setColFilters(f => { const n = {...f}; delete n[col.key]; return n }); setShowFilterRow(false) }
+                              }}
+                              placeholder="Szukaj..."
+                              style={{
+                                width: '100%', boxSizing: 'border-box',
+                                border: '1px solid #93c5fd', borderRadius: 3,
+                                padding: '2px 6px', fontSize: 12, outline: 'none', background: '#fff',
+                              }}
+                            />
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )}
+
               </thead>
 
               <tbody>
-                {rows.map((row, ri) => {
+                {filteredRows.map((row, ri) => {
                   const isRowActive = active?.r === ri
                   return (
                     <tr key={row.id}>
@@ -963,7 +1139,14 @@ export default function OrderProductionPage() {
                             }} onClick={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}>
                               <div style={{ padding: '0 6px', height: ROW_H, display: 'flex', alignItems: 'center', fontSize: 13 }}>
                                 <span
-                                  onClick={e => { e.stopPropagation(); window.open(`/api/parts/${row.id}/pdf`, '_blank') }}
+                                  onClick={e => {
+                                    e.stopPropagation()
+                                    const pdfPath = partPaths.get(row.id)?.PDF_path
+                                    const url = pdfPath
+                                      ? `/api/file?path=${encodeURIComponent(pdfPath)}`
+                                      : `/api/parts/${row.id}/pdf`
+                                    window.open(url, '_blank')
+                                  }}
                                   style={{ color: '#1d4ed8', cursor: 'pointer', fontWeight: 500 }}
                                   title="Otwórz PDF rysunku"
                                 >
@@ -1033,17 +1216,17 @@ export default function OrderProductionPage() {
                                 setActive({ r: ri, c: ci }); containerRef.current?.focus()
                                 if (!rowRec[col.key + '_seq']) {
                                   const next = OP_SEQ_OPTIONS.find(n => !usedSeqs.has(n)) ?? ''
-                                  if (next) { updateCell(ri, col.key + '_seq', next); saveLog(rowRec[col.key], next) }
+                                  if (next) { updateCell(row.id, col.key + '_seq', next); saveLog(rowRec[col.key], next) }
                                 }
                               }}
                               onAfterSelect={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
                               onStartEdit={() => startEditing(ri, ci)}
-                              onUpdateTime={v => { updateCell(ri, col.key, v); saveLog(v, rowRec[col.key + '_seq']) }}
-                              onUpdateSeq={v => { updateCell(ri, col.key + '_seq', v); saveLog(rowRec[col.key], v) }}
+                              onUpdateTime={v => { updateCell(row.id, col.key, v); saveLog(v, rowRec[col.key + '_seq']) }}
+                              onUpdateSeq={v => { updateCell(row.id, col.key + '_seq', v); saveLog(rowRec[col.key], v) }}
                               onCommitAndMove={(dr, dc, _v, ae) => {
                                 setEditing(null)
                                 if (dr !== 0 || dc !== 0) {
-                                  const newR = Math.max(0, Math.min(rows.length - 1, ri + dr))
+                                  const newR = Math.max(0, Math.min(filteredRows.length - 1, ri + dr))
                                   const newC = Math.max(0, Math.min(COLS.length - 1, ci + dc))
                                   setActive({ r: newR, c: newC })
                                   if (ae && !COLS[newC]?.readOnly && !COLS[newC]?.checkbox)
@@ -1069,7 +1252,7 @@ export default function OrderProductionPage() {
                               onActivate={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
                               onAfterSelect={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
                               onUpdate={id => {
-                                updateCell(ri, col.key, id)
+                                updateCell(row.id, col.key, id)
                                 cooperationLogApi.save({
                                   part_id:        row.id,
                                   cooperation_id: id ? parseInt(id) : null,
@@ -1096,14 +1279,14 @@ export default function OrderProductionPage() {
                                 onChange={e => {
                                   e.stopPropagation()
                                   const val = e.target.value
-                                  updateCell(ri, 'material', val)
+                                  updateCell(row.id, 'material', val)
                                   formLogApi.saveMaterialEst(row.id, val ? parseInt(val) : null).catch(console.error)
                                 }}
                                 onClick={e => e.stopPropagation()}
                                 onKeyDown={e => {
                                   if (e.key === 'Delete' || e.key === 'Backspace') {
                                     e.preventDefault(); e.stopPropagation()
-                                    updateCell(ri, 'material', '')
+                                    updateCell(row.id, 'material', '')
                                     formLogApi.saveMaterialEst(row.id, null).catch(console.error)
                                   }
                                 }}
@@ -1144,7 +1327,7 @@ export default function OrderProductionPage() {
                             onActivate={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
                             onStartEdit={() => startEditing(ri, ci)}
                             onCommitAndMove={(dr, dc, v, ae) => {
-                              commitAndMove(ri, ci, dr, dc, v, ae)
+                              commitAndMove(row.id, ci, dr, dc, v, ae)
                               if (col.key === 'col_a' || col.key === 'col_b' || col.key === 'col_c') {
                                 const rowRec = row as unknown as Record<string, string>
                                 const dimA = col.key === 'col_a' ? v : (rowRec['col_a'] || '')
@@ -1178,11 +1361,275 @@ export default function OrderProductionPage() {
                     </td>
                   </tr>
                 )}
+
+                {/* ── Wiersz dodawania nowego detalu ── */}
+                {orderId != null && (() => {
+                  const NR_STYLE: React.CSSProperties = {
+                    height: ROW_H, padding: '0 6px', fontSize: 12,
+                    border: 'none', outline: 'none', width: '100%',
+                    background: 'transparent', boxSizing: 'border-box',
+                  }
+                  const submitNewRow = async () => {
+                    const { numer_detalu, nazwa_detalu, ilosc, termin_wyk } = newRow
+                    if (!numer_detalu.trim() || !nazwa_detalu.trim() || newRowSaving) return
+                    setNewRowSaving(true)
+                    try {
+                      const qty = parseInt(ilosc, 10) || 1
+                      let deadlineAt: string | null = null
+                      if (termin_wyk) {
+                        const [d, m, y] = termin_wyk.split('.')
+                        if (d && m && y) deadlineAt = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
+                        else deadlineAt = termin_wyk
+                      }
+                      const { id: newId } = await partsApi.create({
+                        order_id:      orderId!,
+                        part_number:   numer_detalu.trim(),
+                        name:          nazwa_detalu.trim(),
+                        quantity_right: qty,
+                        deadline_at:   deadlineAt,
+                      })
+                      const newPart = await partsApi.getById(newId)
+                      setRows(prev => [...prev, partToRow(newPart as unknown as Part, decoded, deadlineAt ? new Date(deadlineAt).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '')])
+                      setNewRow({ numer_detalu: '', nazwa_detalu: '', ilosc: '1', termin_wyk: '' })
+                    } catch (e) { console.error('create part error:', e) }
+                    finally { setNewRowSaving(false) }
+                  }
+                  const tdBase: React.CSSProperties = {
+                    height: ROW_H, borderRight: BORDER, borderBottom: BORDER,
+                    borderTop: 'none', borderLeft: 'none', background: '#f0fdf4',
+                    padding: 0, boxSizing: 'border-box',
+                  }
+                  return (
+                    <tr style={{ background: '#f0fdf4' }}>
+                      {COLS.map(col => {
+                        if (col.key === 'lp') return (
+                          <td key="lp" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4'), textAlign: 'center', fontSize: 16, color: '#16a34a', fontWeight: 700 }}>+</td>
+                        )
+                        if (col.key === 'numer_zlecenia') return (
+                          <td key="numer_zlecenia" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }}>
+                            <div style={{ ...NR_STYLE, display: 'flex', alignItems: 'center', color: '#6b7280', fontStyle: 'italic' }}>{decoded}</div>
+                          </td>
+                        )
+                        if (col.key === 'termin_wyk') return (
+                          <td key="termin_wyk" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }} onClick={e => e.stopPropagation()}>
+                            <input
+                              placeholder="DD.MM.RRRR"
+                              value={newRow.termin_wyk}
+                              onChange={e => setNewRow(r => ({ ...r, termin_wyk: e.target.value }))}
+                              onClick={e => e.stopPropagation()}
+                              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') (e.currentTarget.closest('tr')?.querySelector('[data-field="nr"]') as HTMLInputElement)?.focus() }}
+                              style={{ ...NR_STYLE, color: '#374151' }}
+                            />
+                          </td>
+                        )
+                        if (col.key === 'numer_detalu') return (
+                          <td key="numer_detalu" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }} onClick={e => e.stopPropagation()}>
+                            <input
+                              data-field="nr"
+                              placeholder="Nr detalu *"
+                              value={newRow.numer_detalu}
+                              onChange={e => setNewRow(r => ({ ...r, numer_detalu: e.target.value }))}
+                              onClick={e => e.stopPropagation()}
+                              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') (e.currentTarget.closest('tr')?.querySelector('[data-field="nazwa"]') as HTMLInputElement)?.focus() }}
+                              style={{ ...NR_STYLE, fontWeight: 600 }}
+                            />
+                          </td>
+                        )
+                        if (col.key === 'nazwa_detalu') return (
+                          <td key="nazwa_detalu" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }} onClick={e => e.stopPropagation()}>
+                            <input
+                              data-field="nazwa"
+                              placeholder="Nazwa *"
+                              value={newRow.nazwa_detalu}
+                              onChange={e => setNewRow(r => ({ ...r, nazwa_detalu: e.target.value }))}
+                              onClick={e => e.stopPropagation()}
+                              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') (e.currentTarget.closest('tr')?.querySelector('[data-field="ilosc"]') as HTMLInputElement)?.focus() }}
+                              style={{ ...NR_STYLE }}
+                            />
+                          </td>
+                        )
+                        if (col.key === 'ilosc') return (
+                          <td key="ilosc" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }} onClick={e => e.stopPropagation()}>
+                            <input
+                              data-field="ilosc"
+                              type="number"
+                              min={1}
+                              value={newRow.ilosc}
+                              onChange={e => setNewRow(r => ({ ...r, ilosc: e.target.value }))}
+                              onClick={e => e.stopPropagation()}
+                              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); submitNewRow() } }}
+                              onBlur={submitNewRow}
+                              disabled={newRowSaving}
+                              style={{ ...NR_STYLE, textAlign: 'center' }}
+                            />
+                          </td>
+                        )
+                        return <td key={col.key} style={tdBase} />
+                      })}
+                    </tr>
+                  )
+                })()}
               </tbody>
             </table>
 
           </div>
         </div>
+
+        {/* ── Panel brakujących rysunków ──────────────────────────────── */}
+        {(() => {
+          const missing = rows.filter(r => {
+            const p = partPaths.get(r.id)
+            return !p || !p.PDF_path || !p.DWG_path || !p.STP_path
+          })
+          if (missing.length === 0) return null
+          return (
+            <div style={{
+              flexShrink: 0, borderTop: '2px solid #fca5a5',
+              background: '#fff5f5', padding: '8px 20px',
+              maxHeight: 160, overflowY: 'auto',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                {/* Lewa strona — etykieta */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#b91c1c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Brakujące rysunki
+                  </span>
+                  <span style={{
+                    background: '#dc2626', color: '#fff', borderRadius: 10,
+                    fontSize: 11, fontWeight: 700, padding: '1px 7px',
+                  }}>
+                    {missing.length}
+                  </span>
+                </div>
+
+                {/* Prawa strona — przyciski + ścieżka */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={async () => {
+                      const r = await dialogApi.selectFolder().catch(() => ({ path: null }))
+                      if (r.path) {
+                        setSelectedFolder(r.path)
+                        setFileMsg(null)
+                      }
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      border: selectedFolder ? '1px solid #2563eb' : '1px solid #fca5a5',
+                      borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600,
+                      background: selectedFolder ? '#eff6ff' : '#fff',
+                      color: selectedFolder ? '#1d4ed8' : '#b91c1c',
+                      cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+                    </svg>
+                    {selectedFolder
+                      ? selectedFolder.split(/[\\/]/).filter(Boolean).at(-1) ?? selectedFolder
+                      : 'Wybierz Folder'
+                    }
+                  </button>
+
+                  <button
+                    disabled={!selectedFolder || loadingFiles}
+                    onClick={async () => {
+                      if (!selectedFolder) return
+                      setFileMsg(null)
+                      const missingParts = rows
+                        .filter(r => {
+                          const p = partPaths.get(r.id)
+                          return !p || !p.PDF_path || !p.DWG_path || !p.STP_path
+                        })
+                        .map(r => {
+                          const p = partPaths.get(r.id)
+                          return {
+                            id:          r.id,
+                            part_number: r.numer_detalu,
+                            needsPDF:    !p?.PDF_path,
+                            needsDWG:    !p?.DWG_path,
+                            needsSTP:    !p?.STP_path,
+                          }
+                        })
+                      if (!missingParts.length) return
+                      setLoadingFiles(true)
+                      try {
+                        const result = await partsApi.loadFromFolder(selectedFolder, orderId!, missingParts)
+                        const ids   = rows.map(r => r.id)
+                        const fresh = await partsApi.getPaths(ids)
+                        setPartPaths(new Map(fresh.map(p => [p.part_id, p])))
+                        setFileMsg({ text: `Zaktualizowano ${result.updated} z ${missingParts.length} detali`, ok: result.updated > 0 })
+                      } catch (err) {
+                        console.error('load-from-folder:', err)
+                        setFileMsg({ text: `Błąd: ${err instanceof Error ? err.message : String(err)}`, ok: false })
+                      } finally {
+                        setLoadingFiles(false)
+                      }
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600,
+                      background: selectedFolder && !loadingFiles ? '#dc2626' : '#fca5a5',
+                      color: '#fff',
+                      cursor: selectedFolder && !loadingFiles ? 'pointer' : 'not-allowed',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {loadingFiles ? (
+                      <div style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.75s linear infinite' }} />
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                      </svg>
+                    )}
+                    {loadingFiles ? 'Ładowanie...' : 'Załaduj pliki'}
+                  </button>
+                </div>
+              </div>
+              {fileMsg && (
+                <div style={{ fontSize: 12, fontWeight: 600, color: fileMsg.ok ? '#166534' : '#991b1b', padding: '2px 0 4px' }}>
+                  {fileMsg.ok ? '✓' : '✗'} {fileMsg.text}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+                {missing.map(r => {
+                  const p = partPaths.get(r.id)
+                  const missingExt = [
+                    !p?.PDF_path && 'PDF',
+                    !p?.DWG_path && 'DWG',
+                    !p?.STP_path && 'STP',
+                  ].filter(Boolean).join(', ')
+                  const pdfUrl = p?.PDF_path
+                    ? `/api/file?path=${encodeURIComponent(p.PDF_path)}`
+                    : null
+                  return (
+                    <div key={r.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      background: '#fff', border: '1px solid #fca5a5',
+                      borderRadius: 5, padding: '2px 8px', fontSize: 12,
+                    }}>
+                      {pdfUrl ? (
+                        <a
+                          href={pdfUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ fontWeight: 600, color: '#1d4ed8', textDecoration: 'none' }}
+                          title="Otwórz PDF"
+                        >
+                          {r.numer_detalu}
+                        </a>
+                      ) : (
+                        <span style={{ fontWeight: 600, color: '#0f172a' }}>{r.numer_detalu}</span>
+                      )}
+                      <span style={{ color: '#dc2626', fontSize: 11 }}>brak: {missingExt}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* ── Footer na dole ────────────────────────────────────────────── */}
         <div style={{
@@ -1208,9 +1655,25 @@ export default function OrderProductionPage() {
                 disabled={!allDone}
                 onClick={() => {
                   if (!orderId || !allDone) return
-                  ordersApi.readyForProduction(orderId)
-                    .then(() => navigate('/orders'))
-                    .catch(err => alert('Błąd: ' + err.message))
+                  const settings = loadSettings()
+                  const printer = settings.printKarta && settings.printer ? settings.printer : undefined
+                  setReadyModal({ running: true, pdfOk: null, printEnabled: !!printer, printOk: null, errors: [] })
+                  ordersApi.readyForProduction(orderId, printer)
+                    .then(res => {
+                      const errors = res.pdfErrors ?? []
+                      setReadyModal(prev => prev ? {
+                        ...prev, running: false,
+                        pdfOk: errors.length === 0,
+                        printOk: errors.length === 0,
+                        errors,
+                      } : null)
+                    })
+                    .catch(err => {
+                      setReadyModal(prev => prev ? {
+                        ...prev, running: false,
+                        pdfOk: false, printOk: false, errors: [err.message],
+                      } : null)
+                    })
                 }}
                 style={{
                   background: allDone ? BTN_BG : '#9ca3af',
@@ -1230,6 +1693,65 @@ export default function OrderProductionPage() {
           })()}
         </div>
       </div>
+
+      {/* ── Modal: Gotowe do produkcji ───────────────────────────────────── */}
+      {readyModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1001, backdropFilter: 'blur(3px)' }}>
+          <div style={{ background: '#fff', borderRadius: 12, width: 480, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
+
+            {/* Nagłówek */}
+            <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>Gotowe do Produkcji</div>
+              <div style={{ fontSize: 13, color: '#6b7280', marginTop: 3 }}>{decoded}</div>
+            </div>
+
+            {/* Lista czynności */}
+            <div style={{ padding: '4px 24px 0' }}>
+              <CheckItem
+                label="Dopisano informacje do rysunka"
+                done={true}
+              />
+              <CheckItem
+                label="Wygenerowano PDF (Rysunek + Karta Detalu)"
+                done={readyModal.running ? null : readyModal.pdfOk}
+              />
+              <CheckItem
+                label="Wydrukowano Karty Detalu"
+                done={!readyModal.printEnabled ? 'na' : readyModal.running ? null : readyModal.printOk}
+                note={!readyModal.printEnabled ? 'Drukowanie wyłączone w ustawieniach' : undefined}
+              />
+              <CheckItem
+                label="Gotowe do Produkcji"
+                done={readyModal.running ? null : true}
+              />
+            </div>
+
+            {/* Błędy */}
+            {readyModal.errors.length > 0 && (
+              <div style={{ margin: '12px 24px 4px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 7, padding: '10px 14px' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#b91c1c', marginBottom: 6 }}>Błędy:</div>
+                {readyModal.errors.map((e, i) => (
+                  <div key={i} style={{ fontSize: 12, color: '#dc2626', marginTop: i > 0 ? 3 : 0 }}>{e}</div>
+                ))}
+              </div>
+            )}
+
+            {/* Przyciski */}
+            <div style={{ padding: '16px 24px 20px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                onClick={() => setReadyModal(null)}
+                style={{ padding: '8px 18px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}
+              >Zamknij</button>
+              {!readyModal.running && (
+                <button
+                  onClick={() => { setReadyModal(null); navigate('/orders') }}
+                  style={{ padding: '8px 22px', background: BTN_BG, color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+                >Przejdź do zamówień →</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Przeróbka modal ───────────────────────────────────────────────── */}
       {przerobkaIdx !== null && modalRow && (
@@ -1278,9 +1800,7 @@ export default function OrderProductionPage() {
                   type="text"
                   autoFocus
                   value={modalRow.oryginalny_detal}
-                  onChange={e => setRows(prev => prev.map((row, i) =>
-                    i === przerobkaIdx ? { ...row, oryginalny_detal: e.target.value } : row
-                  ))}
+                  onChange={e => { const id = modalRow?.id; setRows(prev => prev.map(row => row.id === id ? { ...row, oryginalny_detal: e.target.value } : row)) }}
                   placeholder="Wpisz fragment numeru detalu..."
                   style={{
                     width: '100%', border: '1px solid #e2e8f0', borderRadius: 7,
@@ -1367,14 +1887,12 @@ export default function OrderProductionPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 4 }}>
                 {/* Usuń powiązanie — tylko gdy jest już przypisana część */}
                 <div>
-                  {przerobkaIdx !== null && rows[przerobkaIdx]?.przerobka && (
+                  {modalRow?.przerobka && (
                     <button
                       onClick={() => {
-                        if (przerobkaIdx === null) return
-                        partsApi.setRework(rows[przerobkaIdx].id, null).catch(console.error)
-                        setRows(prev => prev.map((r, i) =>
-                          i === przerobkaIdx ? { ...r, przerobka: false, rework_parent_part_id: null } : r
-                        ))
+                        if (!modalRow) return
+                        partsApi.setRework(modalRow.id, null).catch(console.error)
+                        setRows(prev => prev.map(r => r.id === modalRow.id ? { ...r, przerobka: false, rework_parent_part_id: null } : r))
                         closeModal()
                       }}
                       style={{ padding: '8px 16px', background: '#fff', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: 7, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}
@@ -1393,11 +1911,9 @@ export default function OrderProductionPage() {
                 <button
                   disabled={!selectedParentId}
                   onClick={() => {
-                    if (przerobkaIdx === null || !selectedParentId) return
-                    partsApi.setRework(rows[przerobkaIdx].id, selectedParentId).catch(console.error)
-                    setRows(prev => prev.map((r, i) =>
-                      i === przerobkaIdx ? { ...r, przerobka: true, rework_parent_part_id: selectedParentId } : r
-                    ))
+                    if (!modalRow || !selectedParentId) return
+                    partsApi.setRework(modalRow.id, selectedParentId).catch(console.error)
+                    setRows(prev => prev.map(r => r.id === modalRow.id ? { ...r, przerobka: true, rework_parent_part_id: selectedParentId } : r))
                     setPrzerobkaIdx(null); setSelectedParentId(null); setSearchResults([])
                   }}
                   style={{ padding: '8px 24px', background: selectedParentId ? '#2563eb' : '#93c5fd', color: 'white', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: selectedParentId ? 'pointer' : 'not-allowed', boxShadow: selectedParentId ? '0 1px 4px rgba(37,99,235,0.3)' : 'none', transition: 'background 0.1s' }}

@@ -1,4 +1,5 @@
 import { Order, Part, OrderListItem, OrderSummary } from '../types'
+import type { AuthUser } from '../context/AuthContext'
 
 const BASE_URL = '/api'
 
@@ -11,6 +12,51 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
+export const authApi = {
+  login: (login: string, password?: string) =>
+    request<AuthUser>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ login, password }),
+    }),
+  requestReset: (userId: number) =>
+    request<{ url: string }>('/auth/request-reset', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    }),
+  resetInfo: (token: string) =>
+    request<{ name: string; surname: string }>(`/auth/reset-info?token=${encodeURIComponent(token)}`),
+  resetPassword: (token: string, password: string) =>
+    request<{ ok: boolean }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, password }),
+    }),
+}
+
+export interface UserRow {
+  id:            number
+  name:          string
+  surname:       string
+  email:         string | null
+  position_id:   number | null
+  position_name: string | null
+  is_active:     boolean
+  login:         string
+}
+
+export interface PositionRow {
+  id:   number
+  name: string
+}
+
+export const usersApi = {
+  getAll:       () => request<UserRow[]>('/users'),
+  getPositions: () => request<PositionRow[]>('/users/positions'),
+  create: (data: { name: string; surname: string; email?: string | null; position_id?: number | null }) =>
+    request<UserRow>('/users', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<{ name: string; surname: string; email: string | null; position_id: number | null; is_active: boolean }>) =>
+    request<{ ok: boolean }>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+}
+
 export const ordersApi = {
   getSummaryList: () =>
     request<OrderListItem[]>('/orders/summary'),
@@ -18,14 +64,22 @@ export const ordersApi = {
   getAll: () =>
     request<Order[]>('/orders'),
 
-  getParts: (orderId: number, minPhase?: string) =>
-    request<Part[]>(`/orders/${orderId}/parts${minPhase ? `?minPhase=${minPhase}` : ''}`),
+  getParts: (orderId: number, minPhase?: string, maxPhase?: string) => {
+    const params = new URLSearchParams()
+    if (minPhase) params.set('minPhase', minPhase)
+    if (maxPhase) params.set('maxPhase', maxPhase)
+    const qs = params.toString()
+    return request<Part[]>(`/orders/${orderId}/parts${qs ? `?${qs}` : ''}`)
+  },
 
   searchByNumber: (orderNumber: string) =>
     request<OrderSummary>(`/orders/search/${encodeURIComponent(orderNumber)}`),
 
-  readyForProduction: (orderId: number) =>
-    request<{ ok: boolean }>(`/orders/${orderId}/ready-for-production`, { method: 'POST' }),
+  readyForProduction: (orderId: number, printer?: string) =>
+    request<{ ok: boolean; pdfErrors?: string[] }>(`/orders/${orderId}/ready-for-production`, {
+      method: 'POST',
+      body: JSON.stringify({ printer }),
+    }),
 }
 
 export interface OperationLog {
@@ -130,6 +184,11 @@ export interface Cooperation {
 
 export const cooperationsApi = {
   getAll: () => request<Cooperation[]>('/cooperations'),
+  upsert: (id: number | null, data: { name: string; price: number | null; unit: string | null }) =>
+    request<{ id: number }>(id ? `/cooperations/${id}` : '/cooperations', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(data),
+    }),
 }
 
 export interface Material {
@@ -142,6 +201,11 @@ export interface Material {
 
 export const materialsApi = {
   getAll: () => request<Material[]>('/materials'),
+  upsert: (id: number | null, data: { name: string; density: number | null; cost: number | null }) =>
+    request<{ id: number }>( id ? `/materials/${id}` : '/materials', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(data),
+    }),
 }
 
 export interface Operation {
@@ -161,7 +225,26 @@ export interface CooperationLog {
   cooperation_id: number
   slot:           number
   phase_id:       number | null
+  phase_name:     string | null
   cost:           number | null
+  sent_at:        string | null
+  received_at:    string | null
+}
+
+export interface KoopPanelRow {
+  part_id:          number
+  slot:             number
+  cooperation_id:   number
+  phase_id:         number | null
+  phase_name:       string | null
+  cost:             number | null
+  sent_at:          string | null
+  received_at:      string | null
+  part_number:      string
+  part_name:        string
+  quantity:         number
+  order_number:     string
+  cooperation_name: string
 }
 
 export const cooperationLogApi = {
@@ -185,6 +268,21 @@ export const cooperationLogApi = {
       method: 'PATCH',
       body: JSON.stringify({ part_id: partId, slot, cost }),
     }),
+
+  getPanel: () =>
+    request<KoopPanelRow[]>('/cooperation-log/panel'),
+
+  cyclePhase: (partId: number, slot: number) =>
+    request<{ phase_id: number | null; phase_name: string | null; sent_at: string | null; received_at: string | null }>(
+      '/cooperation-log/cycle',
+      { method: 'PATCH', body: JSON.stringify({ part_id: partId, slot }) },
+    ),
+
+  updateDates: (partId: number, slot: number, sentAt: string | null, receivedAt: string | null) =>
+    request<{ ok: boolean }>('/cooperation-log/dates', {
+      method: 'PATCH',
+      body: JSON.stringify({ part_id: partId, slot, sent_at: sentAt, received_at: receivedAt }),
+    }),
 }
 
 export interface PartSearchResult {
@@ -192,6 +290,13 @@ export interface PartSearchResult {
   part_number:  string
   name:         string
   order_number: string
+}
+
+export interface PartPaths {
+  part_id:  number
+  PDF_path: string | null
+  DWG_path: string | null
+  STP_path: string | null
 }
 
 export interface PartWithOrder {
@@ -211,11 +316,30 @@ export interface PartWithOrder {
   rework_parent_part_id: number | null
   deadline_at:           string | null
   order_number:          string
+  phase_name:            string | null
 }
 
 export const partsApi = {
+  create: (data: { order_id: number; part_number: string; name: string; quantity_right: number; deadline_at: string | null }) =>
+    request<{ id: number }>('/parts', { method: 'POST', body: JSON.stringify(data) }),
+
+  loadFromFolder: (folderPath: string, orderId: number, parts: { id: number; part_number: string; needsPDF: boolean; needsDWG: boolean; needsSTP: boolean }[]) =>
+    request<{ updated: number }>('/parts/load-from-folder', {
+      method: 'POST',
+      body: JSON.stringify({ folderPath, orderId, parts }),
+    }),
+
+  getAllInPhase: (minPhase: string, maxPhase?: string) => {
+    const params = new URLSearchParams({ minPhase })
+    if (maxPhase) params.set('maxPhase', maxPhase)
+    return request<PartWithOrder[]>(`/parts/all-in-phase?${params}`)
+  },
+
   getById: (partId: number) =>
     request<PartWithOrder>(`/parts/${partId}`),
+
+  getPaths: (partIds: number[]) =>
+    request<PartPaths[]>(`/parts/paths?partIds=${partIds.join(',')}`),
 
   search: (q: string) =>
     request<PartSearchResult[]>(`/parts/search?q=${encodeURIComponent(q)}`),
@@ -231,6 +355,23 @@ export const partsApi = {
       method: 'PATCH',
       body: JSON.stringify({ phase_id: phaseId }),
     }),
+
+  updatePaths: (partId: number, paths: { PDF_path?: string | null; DWG_path?: string | null; STP_path?: string | null }) =>
+    request<{ ok: boolean }>(`/parts/${partId}/paths`, {
+      method: 'PATCH',
+      body: JSON.stringify(paths),
+    }),
+}
+
+export interface CommercialPart {
+  commercial_id:   number
+  part_id:         number
+  numer_zlecenia:  string
+  nr_detalu:       string
+  ilosc:           number
+  data_zamowienia: string | null
+  data_dostawy:    string | null
+  status_num:      0 | 1 | 2
 }
 
 export const commercialApi = {
@@ -245,6 +386,21 @@ export const commercialApi = {
 
   getCheckedPartIds: (partIds: number[]) =>
     request<number[]>(`/commercial?partIds=${partIds.join(',')}`),
+
+  getParts: () =>
+    request<CommercialPart[]>('/commercial/parts'),
+
+  updateStatus: (commercialId: number, status: 'Do zamówienia' | 'Zamówione' | 'Dotarło') =>
+    request<{ ok: boolean }>(`/commercial/${commercialId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+
+  updateDates: (commercialId: number, ordered_at: string | null, arrived_at: string | null) =>
+    request<{ ok: boolean }>(`/commercial/${commercialId}/dates`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ordered_at, arrived_at }),
+    }),
 }
 
 export const formLogApi = {
@@ -287,4 +443,34 @@ export const formLogApi = {
 
   getByPartIds: (partIds: number[]) =>
     request<FormLogDims[]>(`/form-log?partIds=${partIds.join(',')}`),
+}
+
+export interface PhaseInfo {
+  id:          number
+  name:        string
+  description: string | null
+}
+
+export const phasesApi = {
+  getByType: (type: string) =>
+    request<PhaseInfo[]>(`/phases?type=${encodeURIComponent(type)}`),
+}
+
+export const printersApi = {
+  getAll: () => request<string[]>('/printers'),
+}
+
+export const appSettingsApi = {
+  get:  () =>
+    request<{ printer: string | null; print_karta: boolean }>('/settings'),
+  save: (data: { printer?: string | null; print_karta?: boolean }) =>
+    request<{ ok: boolean }>('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+}
+
+export const dialogApi = {
+  selectFolder: () => request<{ path: string | null }>('/dialog/select-folder'),
+  selectFile:   (ext: '.pdf' | '.dwg' | '.stp', initialDir?: string | null) =>
+    request<{ path: string | null }>(`/dialog/select-file?ext=${ext}${initialDir ? `&initialDir=${encodeURIComponent(initialDir)}` : ''}`),
+  openFolder:   (folderPath: string) =>
+    request<{ ok: boolean }>('/dialog/open-folder', { method: 'POST', body: JSON.stringify({ path: folderPath }) }),
 }

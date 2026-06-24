@@ -79,10 +79,6 @@ export default function ProductionCardPage() {
     ? (materials.find(m => m.id === formLog.material_est_id)?.name ?? '')
     : ''
 
-  const dimA = formLog?.dim_a_est != null ? String(formLog.dim_a_est) : ''
-  const dimB = formLog?.dim_b_est != null ? String(formLog.dim_b_est) : ''
-  const dimC = formLog?.dim_c_est != null ? String(formLog.dim_c_est) : ''
-
   type DisplayRow =
     | { kind: 'op';    entry: { log: OperationLog; op: Operation } }
     | { kind: 'label'; name: string }
@@ -147,30 +143,21 @@ export default function ProductionCardPage() {
         {/* Przygotówka */}
         <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', marginTop: -1 }}>
           <colgroup>
-            <col style={{ width: '18%' }} /><col style={{ width: '13%' }} />
-            <col style={{ width: '13%' }} /><col style={{ width: '13%' }} />
-            <col style={{ width: '13%' }} /><col style={{ width: '30%' }} />
+            <col style={{ width: '30%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '50%' }} />
           </colgroup>
           <tbody>
             <tr>
-              <td colSpan={6} style={{ ...TH, paddingTop: 5, paddingBottom: 5 }}>Przygotówka</td>
+              <td colSpan={3} style={{ ...TH, paddingTop: 5, paddingBottom: 5 }}>Przygotówka</td>
             </tr>
             <tr>
-              <td rowSpan={2} style={{ ...TH, verticalAlign: 'middle' }}>Gatunek materiału</td>
-              <td colSpan={4} style={TH}>Formatka</td>
-              <td rowSpan={2} style={{ ...TH, verticalAlign: 'middle' }}>Data</td>
-            </tr>
-            <tr>
-              <td style={TH}>Wysokość</td>
-              <td style={TH}>Szerokość</td>
-              <td style={TH}>Długość</td>
+              <td style={TH}>Gatunek materiału</td>
               <td style={TH}>Handlówka</td>
+              <td style={TH}>Data</td>
             </tr>
             <tr style={{ height: 30 }}>
               <td style={TD}>{materialName}</td>
-              <td style={{ ...TD, textAlign: 'center' }}>{dimA}</td>
-              <td style={{ ...TD, textAlign: 'center' }}>{dimB}</td>
-              <td style={{ ...TD, textAlign: 'center' }}>{dimC}</td>
               <td style={{ ...TD, textAlign: 'center', fontWeight: isHandlowka ? 700 : 400 }}>{isHandlowka ? 'TAK' : 'NIE'}</td>
               <td style={TD}></td>
             </tr>
