@@ -25,9 +25,6 @@ interface Row {
   tokcnc:     string;  tokcnc_seq:    string
   fcnc:       string;  fcnc_seq:      string
   fcnc_robo:  string;  fcnc_robo_seq: string
-  col_a:           string
-  col_b:           string
-  col_c:           string
   kop1:            string
   kop2:            string
   kop3:            string
@@ -75,9 +72,6 @@ const COLS: ColDef[] = [
   { key: 'fcnc',      label: 'FCNC',      group: 'operacje', width: 70 },
   { key: 'fcnc_robo', label: 'FCNC ROBO', group: 'operacje', width: 70 },
   { key: 'suma_czasu', label: 'Suma czasu', group: 'inne', readOnly: true, width: 72 },
-  { key: 'col_a',     label: 'A',          group: 'dodatkowe',  width: 40 },
-  { key: 'col_b',     label: 'B',          group: 'dodatkowe',  width: 40 },
-  { key: 'col_c',     label: 'C',          group: 'dodatkowe',  width: 40 },
   { key: 'material',   label: 'Materiał',   group: 'dodatkowe', width: 110 },
   { key: 'kop1',      label: 'Kop. 1',    group: 'kooperacje', width: 95 },
   { key: 'kop2',      label: 'Kop. 2',    group: 'kooperacje', width: 95 },
@@ -89,9 +83,9 @@ const COLS: ColDef[] = [
 // ─── Kolumny z sortowaniem / filtrowaniem ─────────────────────────────────────
 
 const SORTABLE_COLS   = new Set(['numer_zlecenia','termin_wyk','numer_detalu','nazwa_detalu','ilosc',
-  'ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo','suma_czasu','col_a','col_b','col_c','material'])
+  'ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo','suma_czasu','material'])
 const FILTERABLE_COLS = new Set(['numer_zlecenia','termin_wyk','numer_detalu','nazwa_detalu','ilosc','material'])
-const NUMERIC_SORT    = new Set(['ilosc','ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo','col_a','col_b','col_c'])
+const NUMERIC_SORT    = new Set(['ilosc','ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo'])
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
@@ -195,7 +189,6 @@ function partToRow(p: Part, orderNumber: string, termin: string): Row {
     numer_detalu: p.part_number, nazwa_detalu: p.name, ilosc: calcIlosc(p),
     ploter: '', ploter_seq: '', fkg: '', fkg_seq: '', fko: '', fko_seq: '',
     tok: '', tok_seq: '', tokcnc: '', tokcnc_seq: '', fcnc: '', fcnc_seq: '', fcnc_robo: '', fcnc_robo_seq: '',
-    col_a: '', col_b: '', col_c: '',
     kop1: '', kop2: '', kop3: '', suma_czasu: '', material: '',
     phase_id: p.phase_id ?? null,
     handlowka: false, przerobka: !!p.rework_parent_part_id,
@@ -613,18 +606,15 @@ export default function OrderProductionPage() {
     if (showFilterRow) setTimeout(() => filterInputRef.current?.focus(), 0)
   }, [showFilterRow, filterCol])
 
-  /** Synchronizuje etap detalu: ≥1 czas operacji i ≥2 wymiary → D3, inaczej → D2 */
+  /** Synchronizuje etap detalu: ≥1 czas operacji → D3, inaczej → D2 */
   const syncPhase = useCallback((partId: number) => {
     setRows(prev => prev.map(r => {
       if (r.id !== partId) return r
-      const rec      = r as unknown as Record<string, string>
-      const OPS      = ['ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo']
-      const DIMS     = ['col_a','col_b','col_c']
-      const hasTime  = OPS.some(k => !!rec[k])
-      const dimCount = DIMS.filter(k => !!rec[k]).length
-      const d3ok     = hasTime && dimCount >= 2
-      if (d3ok  && (r.phase_id === null || r.phase_id < 11)) return { ...r, phase_id: 11 }
-      if (!d3ok && r.phase_id !== null && r.phase_id >= 11)  return { ...r, phase_id: 10 }
+      const rec     = r as unknown as Record<string, string>
+      const OPS     = ['ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo']
+      const hasTime = OPS.some(k => !!rec[k])
+      if (hasTime  && (r.phase_id === null || r.phase_id < 11)) return { ...r, phase_id: 11 }
+      if (!hasTime && r.phase_id !== null && r.phase_id >= 11)  return { ...r, phase_id: 10 }
       return r
     }))
   }, [])
@@ -698,9 +688,6 @@ export default function OrderProductionPage() {
           dimLogs.forEach(dl => {
             const ri = baseRows.findIndex(r => r.id === dl.part_id)
             if (ri === -1) return
-            if (dl.dim_a_est != null) rec[ri]['col_a'] = String(dl.dim_a_est)
-            if (dl.dim_b_est != null) rec[ri]['col_b'] = String(dl.dim_b_est)
-            if (dl.dim_c_est != null) rec[ri]['col_c'] = String(dl.dim_c_est)
             if (dl.material_est_id != null) rec[ri]['material'] = String(dl.material_est_id)
           })
 
@@ -854,15 +841,6 @@ export default function OrderProductionPage() {
             cooperationLogApi.save({ part_id: activeRow.id, cooperation_id: null, slot: KOP_SLOT[col.key] }).catch(console.error)
           } else {
             updateCell(activeRow.id, col.key, '')
-            if (col.key === 'col_a' || col.key === 'col_b' || col.key === 'col_c') {
-              formLogApi.saveDims({
-                part_id:   activeRow.id,
-                dim_a_est: col.key === 'col_a' ? null : (activeRowRec['col_a'] ? parseFloat(activeRowRec['col_a']) : null),
-                dim_b_est: col.key === 'col_b' ? null : (activeRowRec['col_b'] ? parseFloat(activeRowRec['col_b']) : null),
-                dim_c_est: col.key === 'col_c' ? null : (activeRowRec['col_c'] ? parseFloat(activeRowRec['col_c']) : null),
-              }).then(() => syncPhase(activeRow.id))
-                .catch(console.error)
-            }
           }
         }
         break
@@ -1328,19 +1306,6 @@ export default function OrderProductionPage() {
                             onStartEdit={() => startEditing(ri, ci)}
                             onCommitAndMove={(dr, dc, v, ae) => {
                               commitAndMove(row.id, ci, dr, dc, v, ae)
-                              if (col.key === 'col_a' || col.key === 'col_b' || col.key === 'col_c') {
-                                const rowRec = row as unknown as Record<string, string>
-                                const dimA = col.key === 'col_a' ? v : (rowRec['col_a'] || '')
-                                const dimB = col.key === 'col_b' ? v : (rowRec['col_b'] || '')
-                                const dimC = col.key === 'col_c' ? v : (rowRec['col_c'] || '')
-                                formLogApi.saveDims({
-                                  part_id:   row.id,
-                                  dim_a_est: dimA ? parseFloat(dimA) : null,
-                                  dim_b_est: dimB ? parseFloat(dimB) : null,
-                                  dim_c_est: dimC ? parseFloat(dimC) : null,
-                                }).then(() => syncPhase(row.id))
-                                  .catch(console.error)
-                              }
                             }}
                             onCancelEdit={cancelEdit}
                           />

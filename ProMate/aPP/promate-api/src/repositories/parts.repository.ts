@@ -229,18 +229,30 @@ class PartsRepository {
     if (maxPhase) {
       req.input('maxPhase', sql.NVarChar(10), maxPhase)
       query = `
-        SELECT p.*, o.order_number
+        SELECT p.*, o.order_number, ph.name AS phase_name
         FROM   [part]  p
-        JOIN   [order] o ON o.id = p.order_id
-        WHERE  p.phase_id >= (SELECT id FROM [phase] WHERE name = @minPhase AND type = 'part')
-          AND  p.phase_id <= (SELECT id FROM [phase] WHERE name = @maxPhase AND type = 'part')
+        JOIN   [order] o  ON o.id  = p.order_id
+        LEFT JOIN [phase] ph ON ph.id = p.phase_id
+        WHERE  p.phase_id IN (
+          SELECT id FROM [phase]
+          WHERE type = 'part'
+            AND CAST(SUBSTRING(name, 2, LEN(name)) AS INT)
+                BETWEEN CAST(SUBSTRING(@minPhase, 2, LEN(@minPhase)) AS INT)
+                    AND CAST(SUBSTRING(@maxPhase, 2, LEN(@maxPhase)) AS INT)
+        )
         ORDER BY o.order_number, p.part_number`
     } else {
       query = `
-        SELECT p.*, o.order_number
+        SELECT p.*, o.order_number, ph.name AS phase_name
         FROM   [part]  p
-        JOIN   [order] o ON o.id = p.order_id
-        WHERE  p.phase_id >= (SELECT id FROM [phase] WHERE name = @minPhase AND type = 'part')
+        JOIN   [order] o  ON o.id  = p.order_id
+        LEFT JOIN [phase] ph ON ph.id = p.phase_id
+        WHERE  p.phase_id IN (
+          SELECT id FROM [phase]
+          WHERE type = 'part'
+            AND CAST(SUBSTRING(name, 2, LEN(name)) AS INT)
+                >= CAST(SUBSTRING(@minPhase, 2, LEN(@minPhase)) AS INT)
+        )
         ORDER BY o.order_number, p.part_number`
     }
     const result = await req.query(query)
