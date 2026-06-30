@@ -26,7 +26,8 @@
     "pdf-lib": "^1.17.1",
     "pdf-to-printer": "^5.8.0",
     "puppeteer": "^25.1.0",
-    "tedious": "^19.2.1"
+    "tedious": "^19.2.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",

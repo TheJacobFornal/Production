@@ -25,6 +25,10 @@ export interface PartWithOrder {
   rework_parent_part_id: number | null
   deadline_at:           string | null
   order_number:          string
+  phase_name:            string | null
+  program:               boolean
+  producer:              string | null
+  comment:               string | null
 }
 
 class PartsRepository {
@@ -37,6 +41,7 @@ class PartsRepository {
                p.quantity_right, p.quantity_left, p.phase_id, p.location_id,
                p.card_printed, p.sticker_printed, p.barcode, p.finished_at,
                p.rework_parent_part_id, p.deadline_at,
+               p.program, p.producer, p.comment,
                o.order_number,
                ph.name AS phase_name
         FROM   [part]  p
@@ -74,6 +79,14 @@ class PartsRepository {
       .input('phaseId', sql.Int, phaseId)
       .query('UPDATE [part] SET phase_id = @phaseId WHERE id = @partId')
     await syncOrderPhase(partId)
+  }
+
+  async updateProgram(partId: number, value: boolean): Promise<void> {
+    const db = await getDb()
+    await db.request()
+      .input('partId', sql.Int,  partId)
+      .input('value',  sql.Bit,  value ? 1 : 0)
+      .query('UPDATE [part] SET program = @value WHERE id = @partId')
   }
 
   async getPathsByPartIds(partIds: number[]): Promise<{ part_id: number; PDF_path: string | null; DWG_path: string | null; STP_path: string | null }[]> {
@@ -173,6 +186,7 @@ class PartsRepository {
     name:          string
     quantityRight: number
     deadlineAt:    string | null
+    compoundId?:   number | null
   }): Promise<number> {
     const db = await getDb()
     const result = await db.request()
@@ -181,12 +195,14 @@ class PartsRepository {
       .input('name',          sql.NVarChar(200), data.name)
       .input('quantityRight', sql.Int,           data.quantityRight)
       .input('deadlineAt',    sql.DateTime,      data.deadlineAt ? new Date(data.deadlineAt) : null)
+      .input('compoundId',    sql.Int,           data.compoundId ?? null)
       .query(`
+        DECLARE @phaseId INT = (SELECT id FROM [phase] WHERE name = 'D1' AND type = 'part')
         INSERT INTO [part]
           (order_id, part_number, name, symbol, quantity_right, quantity_left,
-           deadline_at, card_printed, sticker_printed)
+           deadline_at, phase_id, card_printed, sticker_printed, compound_id)
         OUTPUT INSERTED.id
-        VALUES (@orderId, @partNumber, @name, NULL, @quantityRight, 0, @deadlineAt, 0, 0)
+        VALUES (@orderId, @partNumber, @name, NULL, @quantityRight, 0, @deadlineAt, @phaseId, 0, 0, @compoundId)
       `)
     const partId: number = result.recordset[0].id
 
@@ -219,6 +235,16 @@ class PartsRepository {
       ELSE
         INSERT INTO [paths] (part_id, PDF_path, DWG_path, STP_path)
         VALUES (@partId, @pdfPath, @dwgPath, @stpPath)
+
+      DECLARE @d1Id INT = (SELECT id FROM [phase] WHERE name = 'D1' AND type = 'part')
+      DECLARE @d2Id INT = (SELECT id FROM [phase] WHERE name = 'D2' AND type = 'part')
+      UPDATE [part] SET phase_id = @d2Id
+      WHERE id = @partId AND phase_id = @d1Id
+        AND EXISTS (
+          SELECT 1 FROM [paths]
+          WHERE part_id = @partId
+            AND PDF_path IS NOT NULL AND DWG_path IS NOT NULL AND STP_path IS NOT NULL
+        )
     `)
   }
 
@@ -257,6 +283,17 @@ class PartsRepository {
     }
     const result = await req.query(query)
     return result.recordset as PartWithOrder[]
+  }
+
+  async updateBasicInfo(partId: number, data: { partNumber: string; name: string; quantityRight: number; deadlineAt: string | null }): Promise<void> {
+    const db = await getDb()
+    await db.request()
+      .input('partId',        sql.Int,           partId)
+      .input('partNumber',    sql.NVarChar(100),  data.partNumber)
+      .input('name',          sql.NVarChar(200),  data.name)
+      .input('quantityRight', sql.Int,            data.quantityRight)
+      .input('deadlineAt',    sql.DateTime,       data.deadlineAt ? new Date(data.deadlineAt) : null)
+      .query(`UPDATE [part] SET part_number = @partNumber, name = @name, quantity_right = @quantityRight, deadline_at = @deadlineAt WHERE id = @partId`)
   }
 
   /** Ustawia rework_parent_part_id dla detalu */

@@ -24,6 +24,8 @@ export interface Part {
   sticker_printed: boolean
   barcode: string | null
   finished_at: Date | null
+  producer: string | null
+  comment:  string | null
 }
 
 export interface User {

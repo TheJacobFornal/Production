@@ -2,6 +2,7 @@ import { Router } from 'express'
 import fs from 'fs'
 import path from 'path'
 import { partsRepository } from '../repositories/parts.repository'
+import { getDb, sql } from '../config/database'
 
 const router = Router()
 
@@ -160,10 +161,10 @@ router.post('/load-from-folder', async (req, res) => {
   }
 })
 
-// POST /api/parts  { order_id, part_number, name, quantity_right, deadline_at? }
+// POST /api/parts  { order_id, part_number, name, quantity_right, deadline_at?, compound_id? }
 router.post('/', async (req, res) => {
   try {
-    const { order_id, part_number, name, quantity_right, deadline_at } = req.body
+    const { order_id, part_number, name, quantity_right, deadline_at, compound_id } = req.body
     if (!order_id || !part_number || !name) return res.status(400).json({ message: 'Wymagane: order_id, part_number, name' })
     const id = await partsRepository.createPart({
       orderId:       Number(order_id),
@@ -171,6 +172,7 @@ router.post('/', async (req, res) => {
       name:          String(name).trim(),
       quantityRight: Number(quantity_right) || 1,
       deadlineAt:    deadline_at ?? null,
+      compoundId:    compound_id ? Number(compound_id) : null,
     })
     res.json({ id })
   } catch (err) {
@@ -251,6 +253,7 @@ router.get('/:id(\\d+)/card-pdf', async (req, res) => {
   try {
     const part = await partsRepository.getById(Number(req.params.id))
     if (!part) return res.status(404).json({ message: 'Nie znaleziono detalu' })
+    if (part.phase_name === 'D101') return res.status(403).json({ message: 'Detal wycofany – generowanie karty niedostępne' })
     const baseFolder  = process.env.PROMATE_FOLDER ?? 'C:\\Users\\JakubFornal\\Desktop\\ProMate_rysunki'
     const cardPath    = path.join(baseFolder, part.order_number, 'Gotowe Karty', `${part.part_number}_gotowy_zestaw.pdf`)
     if (!fs.existsSync(cardPath)) return res.status(404).json({ message: 'Brak pliku karty' })
@@ -260,6 +263,43 @@ router.get('/:id(\\d+)/card-pdf', async (req, res) => {
   } catch (err) {
     console.error('parts card-pdf error:', err)
     res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// PATCH /api/parts/:id  { part_number, name, quantity_right, deadline_at? }
+router.patch('/:id(\\d+)', async (req, res) => {
+  try {
+    const partId = Number(req.params.id)
+    const { part_number, name, quantity_right, deadline_at } = req.body
+    if (!part_number || !name) return res.status(400).json({ message: 'part_number i name wymagane' })
+    await partsRepository.updateBasicInfo(partId, {
+      partNumber:    String(part_number).trim(),
+      name:          String(name).trim(),
+      quantityRight: Number(quantity_right) || 1,
+      deadlineAt:    deadline_at ?? null,
+    })
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('parts update error:', err)
+    res.status(500).json({ message: String(err) })
+  }
+})
+
+// PATCH /api/parts/:id/field  { key: 'producent'|'uwagi', value: string }
+router.patch('/:id(\\d+)/field', async (req, res) => {
+  try {
+    const partId = Number(req.params.id)
+    const { key, value } = req.body
+    const allowed = ['producer', 'comment']
+    if (!allowed.includes(key)) return res.status(400).json({ message: 'Niedozwolone pole' })
+    const db = await getDb()
+    await db.request()
+      .input('id',    sql.Int,          partId)
+      .input('value', sql.NVarChar(500), value || null)
+      .query(`UPDATE [part] SET [${key}] = @value WHERE id = @id`)
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ message: String(err) })
   }
 })
 
@@ -273,6 +313,19 @@ router.patch('/:id/phase', async (req, res) => {
     res.json({ ok: true })
   } catch (err) {
     console.error('parts phase error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// PATCH /api/parts/:id/program  { value: boolean }
+router.patch('/:id/program', async (req, res) => {
+  try {
+    const partId = Number(req.params.id)
+    const { value } = req.body
+    await partsRepository.updateProgram(partId, !!value)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('parts program error:', err)
     res.status(500).json({ message: 'Błąd serwera' })
   }
 })

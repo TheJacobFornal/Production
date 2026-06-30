@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer'
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib'
 import { getPrinters, print } from 'pdf-to-printer'
 import fs from 'fs'
 import path from 'path'
@@ -10,6 +10,7 @@ interface CardData {
   order_number: string
   deadline_at: string | null
   quantity_right: number
+  quantity_left:  number
   material_name: string | null
   dim_a: number | null
   dim_b: number | null
@@ -18,6 +19,8 @@ interface CardData {
   cooperations:  Array<{ name: string }>
   pdf_drawing_path: string | null
   is_handlowka:  boolean
+  is_program:    boolean
+  is_przerobka:  boolean
 }
 
 async function getCardData(partId: number): Promise<CardData | null> {
@@ -26,7 +29,8 @@ async function getCardData(partId: number): Promise<CardData | null> {
   const partResult = await db.request()
     .input('id', sql.Int, partId)
     .query(`
-      SELECT p.part_number, p.quantity_right, p.deadline_at,
+      SELECT p.part_number, p.quantity_right, p.quantity_left, p.deadline_at, p.program,
+             p.rework_parent_part_id,
              o.order_number,
              fl.dim_a_est, fl.dim_b_est, fl.dim_c_est,
              m.name AS material_name,
@@ -76,6 +80,7 @@ async function getCardData(partId: number): Promise<CardData | null> {
     order_number:      row.order_number,
     deadline_at:       row.deadline_at ? String(row.deadline_at) : null,
     quantity_right:    row.quantity_right,
+    quantity_left:     row.quantity_left ?? 0,
     material_name:     row.material_name ?? null,
     dim_a:             row.dim_a_est ?? null,
     dim_b:             row.dim_b_est ?? null,
@@ -84,6 +89,8 @@ async function getCardData(partId: number): Promise<CardData | null> {
     cooperations:      coopResult.recordset,
     pdf_drawing_path:  row.PDF_path ?? null,
     is_handlowka:      (commercialResult.recordset[0]?.cnt ?? 0) > 0,
+    is_program:        !!row.program,
+    is_przerobka:      !!row.rework_parent_part_id,
   }
 }
 
@@ -110,9 +117,10 @@ function generateHtml(data: CardData, logoBase64: string): string {
   })
   if (data.cooperations.length > 0) {
     allRows.push({ name: '', notes: null })
-    for (const c of data.cooperations) {
+    data.cooperations.forEach((c, i) => {
       allRows.push({ name: c.name, notes: null })
-    }
+      if (i < data.cooperations.length - 1) allRows.push({ name: '', notes: null })
+    })
   }
   while (allRows.length < TOTAL_OP_ROWS) allRows.push({ name: '', notes: null })
 
@@ -150,6 +158,12 @@ function generateHtml(data: CardData, logoBase64: string): string {
 <body>
 
   ${logoBase64 ? `<img src="data:image/png;base64,${logoBase64}" style="position:absolute;top:-35px;right:5px;height:70px;object-fit:contain">` : ''}
+  ${(data.is_program || data.is_handlowka || data.is_przerobka) ? `
+  <div style="position:absolute;top:-20px;left:5px;display:flex;flex-direction:row;align-items:flex-end;gap:4px;line-height:1;font-family:Arial,Helvetica,sans-serif;font-weight:400;color:#000">
+    ${data.is_program   ? `<div style="font-size:36px">P</div>`      : ''}
+    ${data.is_handlowka ? `<div style="font-size:36px">H</div>`      : ''}
+    ${data.is_przerobka ? `<div style="font-size:22px">Przer.</div>` : ''}
+  </div>` : ''}
   <div style="text-align:center;font-weight:700;font-size:14px;margin-top:35px;margin-bottom:15px">
     KARTA WYROBU DETALU
   </div>
@@ -173,19 +187,30 @@ function generateHtml(data: CardData, logoBase64: string): string {
   <!-- Przygotówka -->
   <table style="margin-top:-2px;flex-shrink:0">
     <colgroup>
-      <col style="width:35%"><col style="width:20%"><col style="width:45%">
+      <col style="width:22%"><col style="width:13%">
+      <col style="width:13%"><col style="width:13%">
+      <col style="width:13%"><col style="width:26%">
     </colgroup>
     <tbody>
       <tr style="height:35px">
-        <td colspan="3" style="${BOLD};padding:5px 7px">Przygotówka</td>
+        <td colspan="6" style="${BOLD};padding:5px 7px">Przygotówka</td>
       </tr>
       <tr style="height:20px">
-        <td style="${BOLD}">Gatunek materiału</td>
+        <td rowspan="2" style="${BOLD};vertical-align:middle;white-space:nowrap">Gatunek materiału</td>
+        <td colspan="4" style="${BOLD}">Formatka</td>
+        <td rowspan="2" style="${BOLD};vertical-align:middle">Data</td>
+      </tr>
+      <tr style="height:20px">
+        <td style="${BOLD}">Wysokość</td>
+        <td style="${BOLD}">Szerokość</td>
+        <td style="${BOLD}">Długość</td>
         <td style="${BOLD}">Handlówka</td>
-        <td style="${BOLD}">Data</td>
       </tr>
       <tr style="height:45px">
         <td style="${CELL};text-align:center">${data.material_name ?? ''}</td>
+        <td style="${CELL};text-align:center">${data.dim_a ?? ''}</td>
+        <td style="${CELL};text-align:center">${data.dim_b ?? ''}</td>
+        <td style="${CELL};text-align:center">${data.dim_c ?? ''}</td>
         <td style="${CELL};text-align:center;font-weight:${data.is_handlowka ? 700 : 400}">${data.is_handlowka ? 'TAK' : 'NIE'}</td>
         <td style="${CELL}"></td>
       </tr>
@@ -257,7 +282,13 @@ export async function generateMergedPdfsForOrder(orderId: number, printerName?: 
   const db = await getDb()
   const partsResult = await db.request()
     .input('orderId', sql.Int, orderId)
-    .query('SELECT id, part_number FROM [part] WHERE order_id = @orderId')
+    .query(`
+      SELECT p.id, p.part_number
+      FROM   [part]  p
+      LEFT JOIN [phase] ph ON ph.id = p.phase_id
+      WHERE  p.order_id = @orderId
+      AND    ISNULL(ph.name, '') != 'D101'
+    `)
 
   const parts: Array<{ id: number; part_number: string }> = partsResult.recordset
   const errors: string[] = []
@@ -290,7 +321,7 @@ export async function generateMergedPdfsForOrder(orderId: number, printerName?: 
           const raw = await page.pdf({
             format: 'A4',
             printBackground: true,
-            margin: { top: '5px', bottom: '40px', left: '40px', right: '40px' },
+            margin: { top: '4px', bottom: '4px', left: '4px', right: '4px' },
           })
           cardPdfBytes = Buffer.from(raw)
         } finally {
@@ -307,6 +338,85 @@ export async function generateMergedPdfsForOrder(orderId: number, printerName?: 
           const drawingBytes = fs.readFileSync(data.pdf_drawing_path)
           const drawingDoc = await PDFDocument.load(drawingBytes)
           const drawingPages = await mergedDoc.copyPages(drawingDoc, drawingDoc.getPageIndices())
+
+          const font     = await mergedDoc.embedFont(StandardFonts.Helvetica)
+          const boldFont = await mergedDoc.embedFont(StandardFonts.HelveticaBold)
+          const fmtDateShort = (d: string | null) => {
+            if (!d) return ''
+            const dt = new Date(d)
+            if (isNaN(dt.getTime())) return ''
+            return dt.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' })
+          }
+          const hasLeft  = data.quantity_left > 0
+          const qtyText  = hasLeft
+            ? (data.quantity_right > 0 ? `${data.quantity_right} + ${data.quantity_left}L` : `${data.quantity_left}L`)
+            : `${data.quantity_right}`
+          const dateText = fmtDateShort(data.deadline_at)
+
+          drawingPages.forEach(p => {
+            const pw = p.getWidth()
+            const ph = p.getHeight()
+            const isLandscape = pw > ph
+
+            let indicatorY = ph - 32
+            if (data.is_program) {
+              p.drawText('P', { x: 12, y: indicatorY, size: 33, font, color: rgb(0, 0, 0) })
+              indicatorY -= 38
+            }
+            if (data.is_handlowka) {
+              p.drawText('H', { x: 12, y: indicatorY, size: 33, font, color: rgb(0, 0, 0) })
+              indicatorY -= 38
+            }
+            if (data.is_przerobka) {
+              p.drawText('Przer.', { x: 12, y: indicatorY, size: 22, font, color: rgb(0, 0, 0) })
+            }
+
+            const textSize    = Math.round(Math.min(pw, ph) * 0.033)
+            const qtySize     = Math.round(textSize * 1.25)
+            const margin      = 12
+            const orderPrefix = `${data.order_number}  szt.: `
+            const prefixWidth = font.widthOfTextAtSize(orderPrefix, textSize)
+            const qtyWidth    = boldFont.widthOfTextAtSize(qtyText, qtySize)
+            const dateWidth   = font.widthOfTextAtSize(dateText, textSize)
+
+            if (isLandscape) {
+              // 270° CCW: tekst płynie w dół (−y). Prawa strona wizualnie = niskie y.
+              const x = pw - qtySize + 9
+              const blockWidth  = prefixWidth + qtyWidth
+              const yOrderStart = ph / 2 + blockWidth / 2
+
+              p.drawText(orderPrefix, {
+                x, y: yOrderStart,
+                size: textSize, font, color: rgb(0, 0, 0), rotate: degrees(270),
+              })
+              p.drawText(qtyText, {
+                x, y: yOrderStart - prefixWidth,
+                size: qtySize, font: boldFont, color: rgb(0, 0, 0), rotate: degrees(270),
+              })
+              p.drawText(dateText, {
+                x, y: margin + dateWidth,
+                size: textSize, font, color: rgb(0, 0, 0), rotate: degrees(270),
+              })
+            } else {
+              const y = ph - qtySize + 9
+              const blockWidth = prefixWidth + qtyWidth
+              const xCenter    = pw / 2 - blockWidth / 2
+
+              p.drawText(orderPrefix, {
+                x: xCenter, y,
+                size: textSize, font, color: rgb(0, 0, 0),
+              })
+              p.drawText(qtyText, {
+                x: xCenter + prefixWidth, y,
+                size: qtySize, font: boldFont, color: rgb(0, 0, 0),
+              })
+              p.drawText(dateText, {
+                x: pw - margin - dateWidth, y,
+                size: textSize, font, color: rgb(0, 0, 0),
+              })
+            }
+          })
+
           drawingPages.forEach(p => mergedDoc.addPage(p))
         } else {
           console.log(`  [BRAK RYSUNKU] ${data.part_number}: ${data.pdf_drawing_path ?? 'brak ścieżki'}`)
@@ -338,7 +448,7 @@ export async function generateMergedPdfsForOrder(orderId: number, printerName?: 
             .input('partId', sql.Int, part.id)
             .query(`
               DECLARE @d6Id INT = (SELECT id FROM phase WHERE name = 'D6' AND type = 'part')
-              UPDATE [part] SET phase_id = @d6Id, card_printed = 1 WHERE id = @partId
+              UPDATE [part] SET phase_id = @d6Id WHERE id = @partId
             `)
           console.log(`  [STATUS] ${data.part_number} → D6`)
         } catch (printErr) {

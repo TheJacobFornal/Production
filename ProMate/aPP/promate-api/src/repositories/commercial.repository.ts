@@ -63,7 +63,9 @@ class CommercialRepository {
         fl.part_id,
         o.order_number   AS numer_zlecenia,
         p.part_number    AS nr_detalu,
+        p.name           AS nazwa_detalu,
         p.quantity_right AS ilosc,
+        p.quantity_left,
         c.ordered_at     AS data_zamowienia,
         c.arrived_at     AS data_dostawy,
         CASE

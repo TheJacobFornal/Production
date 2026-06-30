@@ -1,0 +1,2 @@
+ALTER TABLE [part]
+ADD [program] BIT NOT NULL DEFAULT 0;

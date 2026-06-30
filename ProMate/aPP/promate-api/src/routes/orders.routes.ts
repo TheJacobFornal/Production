@@ -10,6 +10,37 @@ router.get('/', async (_req, res) => {
   res.json(orders)
 })
 
+// POST /api/orders
+router.post('/', async (req, res) => {
+  try {
+    const { order_number, typ_zamowienia } = req.body
+    if (!order_number?.trim()) return res.status(400).json({ message: 'Brak numeru zamówienia' })
+    const id = await orderRepository.createOrder(order_number.trim(), typ_zamowienia ?? undefined)
+    res.json({ id })
+  } catch (err) {
+    console.error('create-order error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// POST /api/orders/full  ← musi być PRZED /:id
+router.post('/full', async (req, res) => {
+  try {
+    const { order_number, typ_zamowienia, parts } = req.body
+    if (!order_number?.trim()) return res.status(400).json({ message: 'Brak numeru zamówienia' })
+    if (!Array.isArray(parts) || !parts.length) return res.status(400).json({ message: 'Brak detali' })
+    const id = await orderRepository.createFullOrder({
+      order_number:   order_number.trim(),
+      typ_zamowienia: typ_zamowienia ?? null,
+      parts,
+    })
+    res.json({ id })
+  } catch (err) {
+    console.error('create-full-order error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
 // GET /api/orders/summary  ← musi być PRZED /:id
 router.get('/summary', async (_req, res) => {
   const orders = await orderRepository.getAllSummary()
@@ -58,6 +89,28 @@ router.post('/:id/ready-for-production', async (req, res) => {
     res.json({ ok: true, pdfErrors: errors.length > 0 ? errors : undefined })
   } catch (err) {
     console.error('ready-for-production error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// POST /api/orders/:id/cancel
+router.post('/:id/cancel', async (req, res) => {
+  try {
+    await orderRepository.cancelOrder(Number(req.params.id))
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('cancel-order error:', err)
+    res.status(500).json({ message: 'Błąd serwera' })
+  }
+})
+
+// DELETE /api/orders/:id
+router.delete('/:id', async (req, res) => {
+  try {
+    await orderRepository.deleteOrder(Number(req.params.id))
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('delete-order error:', err)
     res.status(500).json({ message: 'Błąd serwera' })
   }
 })

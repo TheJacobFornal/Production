@@ -18,6 +18,7 @@ import phasesRoutes from './routes/phases.routes'
 import printersRoutes from './routes/printers.routes'
 import fileRoutes   from './routes/file.routes'
 import dialogRoutes from './routes/dialog.routes'
+import importRoutes from './routes/import.routes'
 
 export function createApp() {
   const app = express()
@@ -42,6 +43,7 @@ export function createApp() {
   app.use('/api/printers', printersRoutes)
   app.use('/api/file',   fileRoutes)
   app.use('/api/dialog', dialogRoutes)
+  app.use('/api/import', importRoutes)
 
   app.get('/api/health', (_req, res) => {
     res.json({

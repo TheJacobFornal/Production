@@ -212,6 +212,8 @@ class CooperationLogRepository {
         CONVERT(nvarchar(30), CASE WHEN ph.name = 'W realizacji' THEN NULL ELSE cl.received_at END, 127) AS received_at,
         p.part_number, p.name AS part_name,
         (COALESCE(p.quantity_right, 0) + COALESCE(p.quantity_left, 0)) AS quantity,
+        COALESCE(p.quantity_right, 0) AS quantity_right,
+        COALESCE(p.quantity_left, 0)  AS quantity_left,
         o.order_number,
         c.name AS cooperation_name,
         ph.name AS phase_name
