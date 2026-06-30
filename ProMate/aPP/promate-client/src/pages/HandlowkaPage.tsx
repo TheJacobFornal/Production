@@ -13,7 +13,8 @@ interface HandlowkaRow {
   part_id:          number
   numer_zlecenia:   string
   nr_detalu:        string
-  ilosc:            number
+  nazwa_detalu:     string
+  ilosc:            string
   data_zamowienia:  string | null
   data_dostawy:     string | null
   status:           Status
@@ -31,7 +32,8 @@ function toRow(p: CommercialPart): HandlowkaRow {
     part_id:         p.part_id,
     numer_zlecenia:  p.numer_zlecenia,
     nr_detalu:       p.nr_detalu,
-    ilosc:           p.ilosc,
+    nazwa_detalu:    p.nazwa_detalu,
+    ilosc:           p.quantity_left > 0 ? `${p.ilosc} + ${p.quantity_left}L` : String(p.ilosc),
     data_zamowienia: p.data_zamowienia,
     data_dostawy:    p.data_dostawy,
     status:          STATUS_FROM_NUM[p.status_num],
@@ -119,11 +121,17 @@ function DateInput({ value, onSave }: DateInputProps) {
   )
 }
 
+// ─── Design tokens (zgodne z PartDetailPage) ─────────────────────────────────
+
+const BORDER   = '1px solid #d1d5db'
+const BG_PAGE  = '#fff'
+const BLUE     = '#1e40af'
+
 const filterInput: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box',
-  border: '1px solid #93c5fd', borderRadius: 3,
-  padding: '3px 7px', fontSize: 12, outline: 'none',
-  background: '#f0f9ff', color: '#1e40af',
+  border: BORDER, borderRadius: 0,
+  padding: '4px 8px', fontSize: 13, outline: 'none',
+  background: '#fff', color: '#0f172a',
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -162,6 +170,7 @@ const COLS: { label: string; key: SortKey | null; width: number; align: 'center'
   { label: 'Lp.',             key: null,              width: 44,  align: 'center' },
   { label: 'Numer Zlecenia',  key: 'numer_zlecenia',  width: 150, align: 'left',   filterable: true },
   { label: 'Nr Detalu',       key: 'nr_detalu',       width: 180, align: 'left',   filterable: true },
+  { label: 'Nazwa Detalu',    key: 'nazwa_detalu',    width: 160, align: 'left',   filterable: true },
   { label: 'Ilość',           key: 'ilosc',           width: 70,  align: 'center' },
   { label: 'Data Zamówienia', key: 'data_zamowienia', width: 140, align: 'left'   },
   { label: 'Data Dostawy',    key: 'data_dostawy',    width: 140, align: 'left'   },
@@ -182,6 +191,7 @@ export default function HandlowkaPage() {
   const [showFilters,    setShowFilters]    = useState(false)
   const [fNumerZlecenia, setFNumerZlecenia] = useState('')
   const [fNrDetalu,      setFNrDetalu]      = useState('')
+  const [fNazwa,         setFNazwa]         = useState('')
   const [fStatus,        setFStatus]        = useState<Status | 'Wszystkie'>('Wszystkie')
 
   useEffect(() => {
@@ -218,8 +228,9 @@ export default function HandlowkaPage() {
     rows.filter(r =>
       r.numer_zlecenia.toLowerCase().includes(fNumerZlecenia.toLowerCase()) &&
       r.nr_detalu.toLowerCase().includes(fNrDetalu.toLowerCase()) &&
+      (r.nazwa_detalu ?? '').toLowerCase().includes(fNazwa.toLowerCase()) &&
       (fStatus === 'Wszystkie' || r.status === fStatus)
-    ), [rows, fNumerZlecenia, fNrDetalu, fStatus])
+    ), [rows, fNumerZlecenia, fNrDetalu, fNazwa, fStatus])
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered
@@ -241,10 +252,21 @@ export default function HandlowkaPage() {
     </div>
   )
 
-  return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#fff', overflow: 'hidden' }}>
+  const TH: React.CSSProperties = {
+    background: '#e8edf2', color: '#374151', fontWeight: 700, fontSize: 11,
+    padding: '10px 14px', border: BORDER, textAlign: 'center',
+    whiteSpace: 'nowrap', userSelect: 'none', letterSpacing: '0.03em',
+    textTransform: 'uppercase' as const,
+  }
+  const TD: React.CSSProperties = {
+    border: BORDER, padding: '9px 14px', fontSize: 13,
+    color: '#1e293b', textAlign: 'center',
+  }
 
-      {/* ── Nagłówek ── */}
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: BG_PAGE, overflow: 'hidden' }}>
+
+      {/* ── Header ── */}
       <div style={{ flexShrink: 0, padding: '32px 28px 16px', background: '#fff', textAlign: 'center' }}>
         <h1 style={{ margin: '0 0 16px', fontSize: 22, fontWeight: 700, color: '#1f2937' }}>
           Zamówienia Handlówki
@@ -272,47 +294,34 @@ export default function HandlowkaPage() {
       </div>
 
       {/* ── Treść ── */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '0 28px 24px' }}>
-        <div style={{ maxWidth: '70%', margin: '0 auto' }}>
-          <table className="w-full text-sm" style={{ borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '16px 28px 24px' }}>
+        <div style={{ maxWidth: 1160, margin: '0 auto', background: '#fff', border: BORDER, borderTop: `3px solid ${BLUE}` }}>
+          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: '100%' }}>
             <colgroup>
               {COLS.map((c, i) => <col key={i} style={{ width: c.width }} />)}
             </colgroup>
 
-            <thead>
-              <tr className="bg-blue-100 text-blue-700">
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+              <tr>
                 {COLS.map((col, i) => {
                   const hasActiveFilter =
                     (i === 1 && !!fNumerZlecenia) ||
-                    (i === 2 && !!fNrDetalu)
+                    (i === 2 && !!fNrDetalu) ||
+                    (i === 3 && !!fNazwa)
                   return (
-                    <th
-                      key={i}
-                      onClick={() => toggleSort(col.key)}
-                      className="border border-gray-300"
-                      style={{
-                        padding: '8px 12px',
-                        textAlign: col.align,
-                        fontWeight: 700,
-                        cursor: col.key ? 'pointer' : 'default',
-                        userSelect: 'none', whiteSpace: 'nowrap',
-                      }}
-                    >
-                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 2 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 3, flex: 1, justifyContent: 'center' }}>
-                          {col.label}
-                          {col.key && <SortIcon active={sortKey === col.key} dir={sortDir} />}
-                        </span>
+                    <th key={i} onClick={() => toggleSort(col.key)} style={{ ...TH, cursor: col.key ? 'pointer' : 'default' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                        {col.label}
+                        {col.key && <SortIcon active={sortKey === col.key} dir={sortDir} />}
                         {col.filterable && (
                           <span
-                            title="Filtruj"
                             onClick={e => { e.stopPropagation(); setShowFilters(v => !v) }}
                             style={{
                               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                              padding: '1px 3px', borderRadius: 3, flexShrink: 0,
-                              background: hasActiveFilter ? '#2563eb' : 'transparent',
+                              padding: '1px 4px', flexShrink: 0,
+                              background: hasActiveFilter ? BLUE : 'transparent',
                               color: hasActiveFilter ? '#fff' : '#93c5fd',
-                              fontSize: 10, lineHeight: 1, cursor: 'pointer',
+                              fontSize: 10, cursor: 'pointer',
                             }}
                           >▽</span>
                         )}
@@ -323,66 +332,73 @@ export default function HandlowkaPage() {
               </tr>
 
               {showFilters && (
-                <tr className="bg-white">
-                  <td className="border border-gray-300 px-1 py-1" />
-                  <td className="border border-gray-300 px-1 py-1">
+                <tr style={{ background: '#f8fafc' }}>
+                  <td style={{ ...TD, padding: 4 }} />
+                  <td style={{ ...TD, padding: 4 }}>
                     <input style={filterInput} placeholder="Szukaj..." value={fNumerZlecenia} onChange={e => setFNumerZlecenia(e.target.value)} onKeyDown={hideFiltersOnEnter} />
                   </td>
-                  <td className="border border-gray-300 px-1 py-1">
+                  <td style={{ ...TD, padding: 4 }}>
                     <input style={filterInput} placeholder="Szukaj..." value={fNrDetalu} onChange={e => setFNrDetalu(e.target.value)} onKeyDown={hideFiltersOnEnter} />
                   </td>
-                  <td className="border border-gray-300 px-1 py-1" />
-                  <td className="border border-gray-300 px-1 py-1" />
-                  <td className="border border-gray-300 px-1 py-1" />
-                  <td className="border border-gray-300 px-1 py-1" />
+                  <td style={{ ...TD, padding: 4 }}>
+                    <input style={filterInput} placeholder="Szukaj..." value={fNazwa} onChange={e => setFNazwa(e.target.value)} onKeyDown={hideFiltersOnEnter} />
+                  </td>
+                  <td style={{ ...TD, padding: 4 }} />
+                  <td style={{ ...TD, padding: 4 }} />
+                  <td style={{ ...TD, padding: 4 }} />
+                  <td style={{ ...TD, padding: 4 }} />
                 </tr>
               )}
             </thead>
 
             <tbody>
-              {sorted.map((row, idx) => (
-                <tr
-                  key={row.commercial_id}
-                  className="hover:bg-blue-50"
-                  onMouseEnter={() => setHovered(row.commercial_id)}
-                  onMouseLeave={() => setHovered(null)}
-                >
-                  <td className="border border-gray-300 px-3 py-2 text-center font-medium text-gray-700">{idx + 1}</td>
-                  <td className="border border-gray-300 px-3 py-2 text-center font-medium text-gray-900">{row.numer_zlecenia}</td>
-                  <td className="border border-gray-300 px-3 py-2 text-center font-medium text-blue-600"
-                    onClick={() => window.open(`/api/parts/${row.part_id}/pdf`, '_blank')}
-                    style={{ cursor: 'pointer' }}
-                  >{row.nr_detalu}</td>
-                  <td className="border border-gray-300 px-3 py-2 text-center font-medium">{row.ilosc}</td>
-                  <td className="border border-gray-300 px-1 py-1 text-center">
-                    <DateInput
-                      value={row.data_zamowienia}
-                      onSave={iso => {
-                        setRows(prev => prev.map(r => r.commercial_id === row.commercial_id ? { ...r, data_zamowienia: iso } : r))
-                        commercialApi.updateDates(row.commercial_id, iso, row.data_dostawy ? toDateInput(row.data_dostawy) : null).catch(console.error)
-                      }}
-                    />
-                  </td>
-                  <td className="border border-gray-300 px-1 py-1 text-center">
-                    <DateInput
-                      value={row.data_dostawy}
-                      onSave={iso => {
-                        setRows(prev => prev.map(r => r.commercial_id === row.commercial_id ? { ...r, data_dostawy: iso } : r))
-                        commercialApi.updateDates(row.commercial_id, row.data_zamowienia ? toDateInput(row.data_zamowienia) : null, iso).catch(console.error)
-                      }}
-                    />
-                  </td>
-                  <td className="border border-gray-300 px-3 py-2 text-center">
-                    <button onClick={() => cycleStatus(row.commercial_id, row.status)} style={{ background: 'none', border: 'none', padding: 0, cursor: row.status === 'Dotarło' ? 'default' : 'pointer' }}>
-                      <StatusBadge status={row.status} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {sorted.map((row, idx) => {
+                const isHov = hovered === row.commercial_id
+                const rowBg = isHov ? '#f0f4ff' : idx % 2 === 0 ? '#fff' : '#fafafa'
+                return (
+                  <tr
+                    key={row.commercial_id}
+                    onMouseEnter={() => setHovered(row.commercial_id)}
+                    onMouseLeave={() => setHovered(null)}
+                    style={{ background: rowBg }}
+                  >
+                    <td style={{ ...TD, color: '#9ca3af', fontWeight: 500, fontSize: 12 }}>{idx + 1}</td>
+                    <td style={{ ...TD, fontWeight: 500 }}>{row.numer_zlecenia}</td>
+                    <td style={{ ...TD, color: BLUE, fontWeight: 600, cursor: 'pointer' }}
+                      onClick={() => window.open(`/api/parts/${row.part_id}/pdf`, '_blank')}
+                    >{row.nr_detalu}</td>
+                    <td style={{ ...TD, textAlign: 'left', fontWeight: 500 }}>{row.nazwa_detalu}</td>
+                    <td style={{ ...TD, fontWeight: 600 }}>{row.ilosc}</td>
+                    <td style={{ ...TD, padding: '2px 6px' }}>
+                      <DateInput
+                        value={row.data_zamowienia}
+                        onSave={iso => {
+                          setRows(prev => prev.map(r => r.commercial_id === row.commercial_id ? { ...r, data_zamowienia: iso } : r))
+                          commercialApi.updateDates(row.commercial_id, iso, row.data_dostawy ? toDateInput(row.data_dostawy) : null).catch(console.error)
+                        }}
+                      />
+                    </td>
+                    <td style={{ ...TD, padding: '2px 6px' }}>
+                      <DateInput
+                        value={row.data_dostawy}
+                        onSave={iso => {
+                          setRows(prev => prev.map(r => r.commercial_id === row.commercial_id ? { ...r, data_dostawy: iso } : r))
+                          commercialApi.updateDates(row.commercial_id, row.data_zamowienia ? toDateInput(row.data_zamowienia) : null, iso).catch(console.error)
+                        }}
+                      />
+                    </td>
+                    <td style={{ ...TD }}>
+                      <button onClick={() => cycleStatus(row.commercial_id, row.status)} style={{ background: 'none', border: 'none', padding: 0, cursor: row.status === 'Dotarło' ? 'default' : 'pointer' }}>
+                        <StatusBadge status={row.status} />
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
 
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="border border-gray-300 text-center py-6 text-gray-400">
+                  <td colSpan={8} style={{ ...TD, color: '#9ca3af', padding: '24px', fontStyle: 'italic' }}>
                     Brak wpisów
                   </td>
                 </tr>

@@ -2,13 +2,59 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ordersApi, formLogApi, operationLogsApi, cooperationLogApi,
-  priceApi, materialsApi, cooperationsApi, operationsApi, partsApi, dialogApi,
+  priceApi, materialsApi, cooperationsApi, operationsApi, partsApi, dialogApi, phasesApi,
 } from '../services/api'
 import type { Part } from '../types'
 import type {
   FormLogDims, OperationLog, CooperationLog, PartPaths,
-  Price, Material, Cooperation, Operation,
+  Price, Material, Cooperation, Operation, PhaseInfo,
 } from '../services/api'
+
+// ─── FilePathInput ────────────────────────────────────────────────────────────
+
+function FilePathInput({
+  pathKey, label, initialPath, partId, onSaved,
+}: {
+  pathKey: 'PDF_path' | 'DWG_path' | 'STP_path'
+  label: string
+  initialPath: string | null
+  partId: number
+  onSaved: (key: 'PDF_path' | 'DWG_path' | 'STP_path', newPath: string | null) => void
+}) {
+  const [value, setValue] = useState(initialPath ?? '')
+
+  useEffect(() => { setValue(initialPath ?? '') }, [initialPath])
+
+  const save = async () => {
+    const trimmed = value.trim().replace(/^"+|"+$/g, '').trim() || null
+    if (trimmed === initialPath) return
+    await partsApi.updatePaths(partId, { [pathKey]: trimmed })
+    onSaved(pathKey, trimmed)
+  }
+
+  const hasPath = !!initialPath
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: 16, lineHeight: 1, color: hasPath ? '#16a34a' : '#dc2626' }}>
+        {hasPath ? '✓' : '✗'}
+      </span>
+      <span style={{ fontWeight: 700, fontSize: 13, minWidth: 36, color: '#374151' }}>{label}</span>
+      <input
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
+        placeholder="Wklej ścieżkę..."
+        style={{
+          flex: 1, fontSize: 11, color: '#374151', padding: '3px 6px',
+          border: '1px solid #d1d5db', borderRadius: 4, background: '#f9fafb',
+          minWidth: 0, fontFamily: 'monospace',
+        }}
+      />
+    </div>
+  )
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +72,9 @@ const PHASE_LABELS: Record<string, string> = {
   D9:   'W trakcie Kop.',
   D10:  'Skończony',
   D11:  'Wyceniony',
+  D100: 'Anulowany',
+  D101: 'Wycofany',
+  D102: 'Wstrzymany',
 }
 
 // ─── Mapping operacji ─────────────────────────────────────────────────────────
@@ -40,35 +89,55 @@ const ORDER_OP_IDS = new Set([1, 2, 3, 4, 5, 6, 7])
 // ─── Design ───────────────────────────────────────────────────────────────────
 
 const BORDER  = '1px solid #d1d5db'
-const BG_PAGE = '#f0f4f8'
+const BG_PAGE = '#f0f2f5'
 const BLUE    = '#1d4ed8'
-const TH_BG   = '#dbeafe'
-const TH_TEXT = '#1e40af'
+const TH_BG   = '#e8edf2'
+const TH_TEXT = '#1e293b'
 
 const sectionTitle: React.CSSProperties = {
-  color: '#1e293b', fontWeight: 700, fontSize: 14,
-  marginBottom: 10, marginTop: 0,
+  fontSize: 13, fontWeight: 700, color: '#1e293b',
+  marginBottom: 14, marginTop: 0,
+  paddingBottom: 8, borderBottom: '2px solid #1d4ed8',
+  textTransform: 'uppercase' as const, letterSpacing: '0.04em',
 }
 const fieldLabel: React.CSSProperties = {
-  color: '#64748b', fontWeight: 600, fontSize: 13,
-  minWidth: 148, display: 'inline-block', flexShrink: 0,
+  fontSize: 11, fontWeight: 600, color: '#64748b',
+  display: 'block', marginBottom: 4,
+  textTransform: 'uppercase' as const, letterSpacing: '0.04em',
 }
-const fieldValue: React.CSSProperties = { color: '#1e293b', fontSize: 13 }
+const fieldValue: React.CSSProperties = {
+  color: '#0f172a', fontSize: 15, fontWeight: 600,
+}
 const card: React.CSSProperties = {
-  background: '#fff', border: BORDER, borderRadius: 8,
-  padding: '14px 18px', marginBottom: 14,
+  background: '#fff', borderRadius: 0,
+  border: BORDER, borderTop: '3px solid #1d4ed8',
+  padding: '18px 20px', marginBottom: 12,
 }
 const tblTh: React.CSSProperties = {
-  background: TH_BG, color: TH_TEXT, fontWeight: 700, fontSize: 11,
-  padding: '5px 10px', border: BORDER, textAlign: 'center', whiteSpace: 'nowrap',
+  background: TH_BG, color: TH_TEXT, fontWeight: 700, fontSize: 12,
+  padding: '8px 12px', border: BORDER, textAlign: 'center',
+  whiteSpace: 'nowrap',
 }
 const tblTd: React.CSSProperties = {
-  padding: '4px 8px', fontSize: 12,
-  border: '1px solid #e2e8f0', textAlign: 'center', color: '#1e293b',
+  padding: '7px 10px', fontSize: 14,
+  border: BORDER, textAlign: 'center', color: '#0f172a',
 }
 const infoBox: React.CSSProperties = {
-  border: '1px solid #e2e8f0', borderRadius: 6,
-  padding: '10px 14px', background: '#fafafa',
+  borderRadius: 0, padding: '12px 14px',
+  background: '#f8fafc', border: BORDER,
+}
+
+const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
+  D4:   { bg: '#f1f5f9', text: '#64748b', dot: '#94a3b8' },
+  D6:   { bg: '#dbeafe', text: '#1d4ed8', dot: '#3b82f6' },
+  D7:   { bg: '#fef3c7', text: '#b45309', dot: '#f59e0b' },
+  D8:   { bg: '#ede9fe', text: '#6d28d9', dot: '#8b5cf6' },
+  D9:   { bg: '#fce7f3', text: '#be185d', dot: '#ec4899' },
+  D10:  { bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
+  D11:  { bg: '#e0f2fe', text: '#0369a1', dot: '#0ea5e9' },
+  D100: { bg: '#fee2e2', text: '#991b1b', dot: '#ef4444' },
+  D101: { bg: '#f3f4f6', text: '#374151', dot: '#9ca3af' },
+  D102: { bg: '#fef9c3', text: '#854d0e', dot: '#eab308' },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -91,7 +160,7 @@ function Dash() { return <span style={{ color: '#cbd5e1' }}>—</span> }
 
 function Field({ label, value }: { label: string; value?: string | number | null }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 7 }}>
+    <div>
       <span style={fieldLabel}>{label}</span>
       <span style={fieldValue}>{value != null && value !== '' ? value : <Dash />}</span>
     </div>
@@ -110,11 +179,12 @@ function EmptyRow({ cols }: { cols: number }) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function PartDetailContent({ numer_detalu: rawNum, part_id: propPartId, onClose, onOperationTimeUpdated }: {
+export function PartDetailContent({ numer_detalu: rawNum, part_id: propPartId, onClose, onOperationTimeUpdated, onPathSaved }: {
   numer_detalu?: string
   part_id?: number
   onClose?: () => void
   onOperationTimeUpdated?: (partId: number, operationId: number, timeEstimated: number | null) => void
+  onPathSaved?: (partId: number, pathKey: 'PDF_path' | 'DWG_path' | 'STP_path', val: string | null) => void
 }) {
   const navigate = useNavigate()
   const decoded  = rawNum ? decodeURIComponent(rawNum) : ''
@@ -128,25 +198,35 @@ export function PartDetailContent({ numer_detalu: rawNum, part_id: propPartId, o
   const [coops,     setCoops]     = useState<Cooperation[]>([])
   const [ops,       setOps]       = useState<Operation[]>([])
   const [paths,     setPaths]     = useState<PartPaths | null>(null)
-  const [loading,   setLoading]   = useState(true)
-  const [error,     setError]     = useState<string | null>(null)
-  const [editingOp, setEditingOp] = useState<{ operationId: number; value: string } | null>(null)
+  const [loading,           setLoading]           = useState(true)
+  const [error,             setError]             = useState<string | null>(null)
+  const [editingOp,         setEditingOp]         = useState<{ operationId: number; value: string } | null>(null)
+  const [d100PhaseId,       setD100PhaseId]       = useState<number | null>(null)
+  const [d102PhaseId,       setD102PhaseId]       = useState<number | null>(null)
+  const [allPhases,         setAllPhases]         = useState<PhaseInfo[]>([])
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [cancelling,        setCancelling]        = useState(false)
+  const [suspending,        setSuspending]        = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
     const load = async () => {
       try {
-        const [summaries, mats, cps, operations] = await Promise.all([
+        const [summaries, mats, cps, operations, phases] = await Promise.all([
           ordersApi.getSummaryList(),
           materialsApi.getAll(),
           cooperationsApi.getAll(),
           operationsApi.getAll(),
+          phasesApi.getByType('part'),
         ])
         if (cancelled) return
         setMaterials(mats)
         setCoops(cps)
         setOps(operations)
+        setD100PhaseId(phases.find(p => p.name === 'D100')?.id ?? null)
+        setD102PhaseId(phases.find(p => p.name === 'D102')?.id ?? null)
+        setAllPhases(phases)
 
         const deadlineMap = new Map(summaries.map(s => [s.order_number, s.deadline_at]))
 
@@ -211,6 +291,11 @@ export function PartDetailContent({ numer_detalu: rawNum, part_id: propPartId, o
 
   const part  = info?.part
   const ilosc = part ? (part.quantity_right || 0) + (part.quantity_left || 0) : null
+  const iloscDisplay = part
+    ? (part.quantity_left > 0
+      ? `${part.quantity_right} + ${part.quantity_left}L`
+      : String(part.quantity_right))
+    : undefined
 
   // Wymiary formatki
   const matName = formLog?.material_id ? (materials.find(m => m.id === formLog.material_id)?.name ?? '') : ''
@@ -258,22 +343,86 @@ export function PartDetailContent({ numer_detalu: rawNum, part_id: propPartId, o
     setEditingOp(null)
   }
 
+  const cancelPart = async () => {
+    if (!part || !d100PhaseId) return
+    setCancelling(true)
+    try {
+      await partsApi.updatePhase(part.id, d100PhaseId)
+      setInfo(prev => prev ? { ...prev, part: { ...prev.part, phase_name: 'D100', phase_id: d100PhaseId } } : prev)
+      setShowCancelConfirm(false)
+    } catch (e) {
+      console.error('cancel part error:', e)
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  const suspendPart = async () => {
+    if (!part || !d102PhaseId) return
+    setSuspending(true)
+    try {
+      await partsApi.updatePhase(part.id, d102PhaseId)
+      setInfo(prev => prev ? { ...prev, part: { ...prev.part, phase_name: 'D102', phase_id: d102PhaseId } } : prev)
+    } catch (e) {
+      console.error('suspend part error:', e)
+    } finally {
+      setSuspending(false)
+    }
+  }
+
+  const restorePart = async () => {
+    if (!part) return
+    // Compute target phase from current operation states
+    // Operation phase IDs: 16=Oczekuje(r), 17=W realizacji(o), 18=Wykonana(g)
+    const timedOps  = opLogs.filter(l => l.time_estimated != null && ORDER_OP_IDS.has(l.operation_id))
+    const doneOps   = timedOps.filter(l => l.phase_id === 18)
+    const hasStarted = timedOps.some(l => l.phase_id === 17 || l.phase_id === 18)
+
+    let targetName: string
+    if (timedOps.length > 0 && doneOps.length === timedOps.length) {
+      targetName = 'D8'
+    } else if (hasStarted) {
+      targetName = 'D7'
+    } else {
+      targetName = 'D6'
+    }
+
+    const targetPhase = allPhases.find(p => p.name === targetName)
+    if (!targetPhase) return
+
+    setSuspending(true)
+    try {
+      await partsApi.updatePhase(part.id, targetPhase.id)
+      setInfo(prev => prev ? { ...prev, part: { ...prev.part, phase_name: targetName, phase_id: targetPhase.id } } : prev)
+    } catch (e) {
+      console.error('restore part error:', e)
+    } finally {
+      setSuspending(false)
+    }
+  }
+
   return (
     <div style={{ background: BG_PAGE, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '9px 28px', background: '#fff', borderBottom: BORDER, flexShrink: 0,
+        padding: '0 28px', background: '#1e40af', borderBottom: '3px solid #1e3a8a', flexShrink: 0, height: 52,
       }}>
         <button
           onClick={() => onClose ? onClose() : navigate(-1)}
-          style={{ border: 'none', background: 'none', cursor: 'pointer', color: BLUE, fontSize: 13, fontWeight: 600, padding: '4px 0' }}
+          style={{
+            border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.1)',
+            borderRadius: 0, cursor: 'pointer', color: '#fff',
+            fontSize: 13, fontWeight: 600, padding: '6px 14px', lineHeight: 1,
+          }}
         >
           {onClose ? '✕ Zamknij' : '← Wróć'}
         </button>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1f2937', margin: 0 }}>Karta Detalu</h1>
-        <img src="/Logo.png" alt="ProMate" style={{ height: 32, objectFit: 'contain' }} />
+        <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: '#fff' }}>
+          Karta Detalu
+        </div>
+        <img src="/Logo.png" alt="ProMate" style={{ height: 30, objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
       </div>
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
@@ -286,40 +435,123 @@ export function PartDetailContent({ numer_detalu: rawNum, part_id: propPartId, o
           {error}
         </div>
       ) : (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px 36px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 28px', alignItems: 'start', maxWidth: 1100, margin: '0 auto' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px 40px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px', alignItems: 'start', maxWidth: 1200, margin: '0 auto' }}>
 
             {/* ═══ LEWA KOLUMNA ═══ */}
             <div>
 
               {/* Informacje podstawowe */}
               <div style={card}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                  <span style={{ ...sectionTitle, marginBottom: 0 }}>Informacje podstawowe</span>
-                  {part?.symbol && (
-                    <span style={{ padding: '2px 10px', borderRadius: 4, background: '#eff6ff', border: '1px solid #93c5fd', color: BLUE, fontSize: 12, fontWeight: 600 }}>
-                      {part.symbol}
-                    </span>
-                  )}
+                <div style={{ marginBottom: 18 }}>
+                  <span style={sectionTitle}>Informacje podstawowe</span>
                 </div>
-                <Field label="Nr Detalu:"        value={part?.part_number} />
-                <Field label="Nazwa Detalu:"     value={part?.name} />
-                <Field label="Nr Zlecenia:"      value={info?.orderNumber} />
-                <Field label="Termin wykonania:" value={formatDate(info?.deadlineAt) || undefined} />
-                <Field label="Ilość:"            value={ilosc ?? undefined} />
-                <div style={{ height: 6 }} />
-                <Field label="Status:" value={part?.phase_name ? (PHASE_LABELS[part.phase_name] ?? part.phase_name) : undefined} />
-                <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 7 }}>
-                  <span style={fieldLabel}>Karta wydrukowana:</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: part?.card_printed ? '#16a34a' : '#dc2626' }}>
+
+                {/* Grid 3-kolumnowy */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px 20px', marginBottom: 16 }}>
+                  <Field label="Nr Detalu"        value={part?.part_number} />
+                  <Field label="Nazwa Detalu"     value={part?.name} />
+                  <Field label="Ilość"            value={iloscDisplay} />
+                  <Field label="Nr Zlecenia"      value={info?.orderNumber} />
+                  <Field label="Termin wykonania" value={formatDate(info?.deadlineAt) || undefined} />
+                  <div>
+                    <span style={fieldLabel}>Status</span>
+                    {part?.phase_name ? (() => {
+                      const ph = part.phase_name
+                      const c  = STATUS_COLORS[ph]
+                      const lb = PHASE_LABELS[ph] ?? ph
+                      return c ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 20, background: c.bg, color: c.text, fontSize: 11, fontWeight: 600 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: c.dot, flexShrink: 0 }} />
+                          {lb}
+                        </span>
+                      ) : <span style={fieldValue}>{lb}</span>
+                    })() : <Dash />}
+                  </div>
+                </div>
+
+                {/* Karta wydrukowana */}
+                <div>
+                  <span style={fieldLabel}>Karta wydrukowana</span>
+                  <span style={{ ...fieldValue, color: part?.card_printed ? '#16a34a' : '#dc2626' }}>
                     {part?.card_printed ? '✓ Tak' : '✗ Nie'}
                   </span>
+                </div>
+
+                {/* Anuluj / Wstrzymaj detal */}
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: BORDER }}>
+                  {part?.phase_name === 'D102' ? (
+                    <button
+                      disabled={suspending}
+                      onClick={restorePart}
+                      style={{
+                        padding: '7px 16px', fontSize: 13, fontWeight: 700,
+                        background: '#16a34a', color: '#fff', border: 'none',
+                        borderRadius: 0, cursor: suspending ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {suspending ? '...' : 'Przywróć Detal'}
+                    </button>
+                  ) : part?.phase_name === 'D100' ? (
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1px solid #fca5a5', padding: '6px 14px', display: 'inline-block' }}>
+                      ✗ Detal anulowany
+                    </span>
+                  ) : !showCancelConfirm ? (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => setShowCancelConfirm(true)}
+                        style={{
+                          padding: '7px 16px', fontSize: 13, fontWeight: 700,
+                          background: '#fff', color: '#dc2626', border: '1px solid #dc2626',
+                          borderRadius: 0, cursor: 'pointer',
+                        }}
+                      >
+                        Anuluj Detal
+                      </button>
+                      <button
+                        disabled={suspending}
+                        onClick={suspendPart}
+                        style={{
+                          padding: '7px 16px', fontSize: 13, fontWeight: 700,
+                          background: '#fff', color: '#b45309', border: '1px solid #d97706',
+                          borderRadius: 0, cursor: suspending ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {suspending ? '...' : 'Wstrzymaj Detal'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 13, color: '#374151', fontWeight: 600 }}>Czy na pewno anulować detal?</span>
+                      <button
+                        disabled={cancelling}
+                        onClick={cancelPart}
+                        style={{
+                          padding: '6px 14px', fontSize: 13, fontWeight: 700,
+                          background: '#dc2626', color: '#fff', border: 'none',
+                          borderRadius: 0, cursor: cancelling ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {cancelling ? '...' : 'Tak, anuluj'}
+                      </button>
+                      <button
+                        onClick={() => setShowCancelConfirm(false)}
+                        style={{
+                          padding: '6px 14px', fontSize: 13, fontWeight: 600,
+                          background: '#fff', color: '#6b7280', border: BORDER,
+                          borderRadius: 0, cursor: 'pointer',
+                        }}
+                      >
+                        Nie
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Planowane operacje */}
               <div style={card}>
-                <div style={sectionTitle}>Planowane operacje:</div>
+                <div style={sectionTitle}>Planowane operacje</div>
                 {ops.length === 0
                   ? <div style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: 12, padding: '4px 0' }}>Ładowanie…</div>
                   : (() => {
@@ -383,6 +615,7 @@ export function PartDetailContent({ numer_detalu: rawNum, part_id: propPartId, o
               {/* Kooperacje (wyjazd / przyjazd) */}
               <div style={card}>
                 <div style={sectionTitle}>Planowane kooperacje</div>
+
                 <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                   <thead>
                     <tr>
@@ -455,86 +688,54 @@ export function PartDetailContent({ numer_detalu: rawNum, part_id: propPartId, o
               </div>
 
               {/* Pliki */}
-              {(() => {
-                const fileTypes: { key: 'PDF_path' | 'DWG_path' | 'STP_path'; label: string; ext: '.pdf' | '.dwg' | '.stp' }[] = [
-                  { key: 'PDF_path', label: 'PDF', ext: '.pdf' },
-                  { key: 'DWG_path', label: 'DWG', ext: '.dwg' },
-                  { key: 'STP_path', label: 'STP', ext: '.stp' },
-                ]
-                const anyPath = paths?.PDF_path || paths?.DWG_path || paths?.STP_path
-                const folderPath = anyPath ? anyPath.replace(/[/\\][^/\\]+$/, '') : null
-
-                const pickFile = async (key: 'PDF_path' | 'DWG_path' | 'STP_path', ext: '.pdf' | '.dwg' | '.stp') => {
-                  if (!part) return
-                  const res = await dialogApi.selectFile(ext, folderPath)
-                  if (!res.path) return
-                  await partsApi.updatePaths(part.id, { [key]: res.path })
-                  const updated = await partsApi.getPaths([part.id])
-                  setPaths(updated[0] ?? null)
-                }
-
-                return (
-                  <div style={card}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <div style={sectionTitle}>Pliki:</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        {part && (
-                          <button
-                            onClick={() => window.open(`/api/parts/${part.id}/card-pdf`, '_blank')}
-                            style={{
-                              padding: '3px 10px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
-                              background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', fontWeight: 600,
-                            }}
-                          >
-                            📄 Otwórz kartę
-                          </button>
-                        )}
-                        {folderPath && (
-                          <button
-                            onClick={() => dialogApi.openFolder(folderPath)}
-                            style={{
-                              padding: '3px 10px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
-                              background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', fontWeight: 600,
-                            }}
-                          >
-                            📁 Otwórz folder
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {fileTypes.map(({ key, label, ext }) => {
-                        const filePath = paths?.[key] ?? null
-                        const fileName = filePath ? filePath.replace(/.*[/\\]/, '') : null
-                        return (
-                          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 16, lineHeight: 1, color: filePath ? '#16a34a' : '#dc2626' }}>
-                              {filePath ? '✓' : '✗'}
-                            </span>
-                            <span style={{ fontWeight: 700, fontSize: 13, minWidth: 36, color: '#374151' }}>{label}</span>
-                            <span style={{
-                              flex: 1, fontSize: 11, color: '#6b7280',
-                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            }} title={filePath ?? ''}>
-                              {fileName ?? '—'}
-                            </span>
-                            <button
-                              onClick={() => pickFile(key, ext)}
-                              style={{
-                                padding: '2px 8px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
-                                background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db',
-                                flexShrink: 0,
-                              }}
-                            >
-                              {filePath ? 'Zmień' : 'Dodaj'}
-                            </button>
-                          </div>
-                        )
-                      })}
+              {part && (
+                <div style={card}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div style={sectionTitle}>Pliki:</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => window.open(`/api/parts/${part.id}/card-pdf`, '_blank')}
+                        style={{
+                          padding: '3px 10px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
+                          background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', fontWeight: 600,
+                        }}
+                      >
+                        📄 Otwórz kartę
+                      </button>
+                      {paths?.PDF_path && (
+                        <button
+                          onClick={() => window.open(`/api/file?path=${encodeURIComponent(paths.PDF_path!)}`, '_blank')}
+                          style={{
+                            padding: '3px 10px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
+                            background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', fontWeight: 600,
+                          }}
+                        >
+                          🗺️ Otwórz Rysunek
+                        </button>
+                      )}
                     </div>
                   </div>
-                )
-              })()}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {([
+                      { pathKey: 'PDF_path' as const, label: 'PDF' },
+                      { pathKey: 'DWG_path' as const, label: 'DWG' },
+                      { pathKey: 'STP_path' as const, label: 'STP' },
+                    ]).map(({ pathKey, label }) => (
+                      <FilePathInput
+                        key={pathKey}
+                        pathKey={pathKey}
+                        label={label}
+                        initialPath={paths?.[pathKey] ?? null}
+                        partId={part.id}
+                        onSaved={(key, newPath) => {
+                          setPaths(prev => prev ? { ...prev, [key]: newPath } : prev)
+                          onPathSaved?.(part.id, key, newPath)
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* ═══ PRAWA KOLUMNA ═══ */}
@@ -542,61 +743,56 @@ export function PartDetailContent({ numer_detalu: rawNum, part_id: propPartId, o
 
               {/* Formatka */}
               <div style={card}>
-                <div style={sectionTitle}>Formatka:</div>
-                <div style={infoBox}>
-                  <Field label="Wymiary:"        value={dimStr || undefined} />
-                  <Field label="Materiał:"       value={matName || undefined} />
-                  <Field label="Masa szt.:"      value={formLog?.weight_one != null ? fmt(formLog.weight_one, 'kg') : undefined} />
-                  <Field label="Pow. obr. szt.:" value={formLog?.area_one   != null ? fmt(formLog.area_one,   'dm²') : undefined} />
-                  <div style={{ height: 8 }} />
-                  <Field
-                    label="Łączna masa:"
-                    value={formLog?.weight_one != null && ilosc ? fmt(Math.round(formLog.weight_one * ilosc * 100) / 100, 'kg') : undefined}
-                  />
-                  <Field
-                    label="Łączna pow. obr.:"
-                    value={formLog?.area_one != null && ilosc ? fmt(Math.round(formLog.area_one * ilosc * 100) / 100, 'dm²') : undefined}
-                  />
+                <div style={sectionTitle}>Formatka</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 20px' }}>
+                  <Field label="Wymiary"        value={dimStr || undefined} />
+                  <Field label="Materiał"       value={matName || undefined} />
+                  <Field label="Masa szt."      value={formLog?.weight_one != null ? fmt(formLog.weight_one, 'kg') : undefined} />
+                  <Field label="Pow. obr. szt." value={formLog?.area_one   != null ? fmt(formLog.area_one,   'dm²') : undefined} />
                 </div>
+                {(formLog?.weight_one != null || formLog?.area_one != null) && ilosc ? (
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #f0f2f5', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 20px' }}>
+                    <Field
+                      label="Łączna masa"
+                      value={formLog?.weight_one != null ? fmt(Math.round(formLog.weight_one * ilosc * 100) / 100, 'kg') : undefined}
+                    />
+                    <Field
+                      label="Łączna pow. obr."
+                      value={formLog?.area_one != null ? fmt(Math.round(formLog.area_one * ilosc * 100) / 100, 'dm²') : undefined}
+                    />
+                  </div>
+                ) : null}
               </div>
 
               {/* Wycena */}
               <div style={card}>
-                <div style={sectionTitle}>Wycena:</div>
-                <div style={infoBox}>
-                  <Field label="Handlówka kpl:"   value={price?.cost_commercial_kit != null ? fmt(price.cost_commercial_kit, 'zł') : undefined} />
-                  <Field label="Kwota rbh:"        value={price?.cost_labor_hour     != null ? fmt(price.cost_labor_hour,     'zł') : undefined} />
-                  <Field label="Cena kooperacji:"  value={price?.cost_cooperation    != null ? fmt(price.cost_cooperation,    'zł') : undefined} />
-                  <Field label="Suma obróbki:"     value={price?.cost_machining      != null ? fmt(price.cost_machining,      'zł') : undefined} />
-                  <Field label="Materiał kpl:"     value={formLog?.cost_kit          != null ? fmt(formLog.cost_kit,          'zł') : undefined} />
-                  <Field label="Cena kpl:"         value={price?.price_kit           != null ? fmt(price.price_kit,           'zł') : undefined} />
-
-                  {/* Cena szt. — wyróżniona */}
-                  <div style={{ paddingTop: 10, marginTop: 6, borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'baseline', gap: 12 }}>
-                    <span style={{ color: BLUE, fontWeight: 800, fontSize: 17 }}>Cena szt.:</span>
-                    <span style={{ fontSize: 17, fontWeight: 700, color: BLUE }}>
-                      {price?.price_piece != null ? `${price.price_piece} zł` : <Dash />}
-                    </span>
-                  </div>
+                <div style={sectionTitle}>Wycena</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 20px' }}>
+                  <Field label="Handlówka kpl"  value={price?.cost_commercial_kit != null ? fmt(price.cost_commercial_kit, 'zł') : undefined} />
+                  <Field label="Kwota rbh"       value={price?.cost_labor_hour     != null ? fmt(price.cost_labor_hour,     'zł') : undefined} />
+                  <Field label="Cena kooperacji" value={price?.cost_cooperation    != null ? fmt(price.cost_cooperation,    'zł') : undefined} />
+                  <Field label="Suma obróbki"    value={price?.cost_machining      != null ? fmt(price.cost_machining,      'zł') : undefined} />
+                  <Field label="Materiał kpl"    value={formLog?.cost_kit          != null ? fmt(formLog.cost_kit,          'zł') : undefined} />
+                  <Field label="Cena kpl"        value={price?.price_kit           != null ? fmt(price.price_kit,           'zł') : undefined} />
+                </div>
+                <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: '#9ca3af' }}>Cena szt.</span>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: BLUE }}>
+                    {price?.price_piece != null ? `${price.price_piece} zł` : <Dash />}
+                  </span>
                 </div>
               </div>
 
               {/* Dane poprodukcyjne */}
               <div style={card}>
-                <div style={sectionTitle}>Dane Poprodukcyjne:</div>
-
-                <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 12 }}>
-                  <span style={{ ...fieldLabel, fontSize: 12 }}>Termin zamknięcia:</span>
-                  <span style={{ ...fieldValue, fontWeight: 600 }}>
-                    {formatDate(part?.finished_at) || <Dash />}
-                  </span>
+                <div style={sectionTitle}>Dane Poprodukcyjne</div>
+                <div style={{ marginBottom: 14 }}>
+                  <Field label="Termin zamknięcia" value={formatDate(part?.finished_at) || undefined} />
                 </div>
-
-                {/* Kooperacje / Cena */}
                 <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                   <thead>
                     <tr>
-                      <th style={{ ...tblTh, textAlign: 'left', width: 130 }}>Kooperacje</th>
+                      <th style={{ ...tblTh, textAlign: 'left' }}>Kooperacje</th>
                       <th style={{ ...tblTh, width: 90 }}>Cena [zł]</th>
                     </tr>
                   </thead>

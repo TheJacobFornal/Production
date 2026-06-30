@@ -80,6 +80,34 @@ export const ordersApi = {
       method: 'POST',
       body: JSON.stringify({ printer }),
     }),
+
+  cancelOrder: (orderId: number) =>
+    request<{ ok: boolean }>(`/orders/${orderId}/cancel`, { method: 'POST' }),
+
+  deleteOrder: (orderId: number) =>
+    request<{ ok: boolean }>(`/orders/${orderId}`, { method: 'DELETE' }),
+
+  createOrder: (orderNumber: string, typZamowienia?: string) =>
+    request<{ id: number }>('/orders', { method: 'POST', body: JSON.stringify({ order_number: orderNumber, typ_zamowienia: typZamowienia }) }),
+
+  createFullOrder: (data: {
+    order_number:   string
+    typ_zamowienia: string | null
+    parts: Array<{
+      part_number:    string
+      name:           string
+      quantity_right: number
+      deadline_at:    string | null
+      pdf_path:       string | null
+      dwg_path:       string | null
+      stp_path:       string | null
+      material_id:    number | null
+      kop1_id:        number | null
+      kop2_id:        number | null
+      kop3_id:        number | null
+    }>
+  }) =>
+    request<{ id: number }>('/orders/full', { method: 'POST', body: JSON.stringify(data) }),
 }
 
 export interface OperationLog {
@@ -243,6 +271,8 @@ export interface KoopPanelRow {
   part_number:      string
   part_name:        string
   quantity:         number
+  quantity_right:   number
+  quantity_left:    number
   order_number:     string
   cooperation_name: string
 }
@@ -320,7 +350,7 @@ export interface PartWithOrder {
 }
 
 export const partsApi = {
-  create: (data: { order_id: number; part_number: string; name: string; quantity_right: number; deadline_at: string | null }) =>
+  create: (data: { order_id: number; part_number: string; name: string; quantity_right: number; deadline_at: string | null; compound_id?: number | null }) =>
     request<{ id: number }>('/parts', { method: 'POST', body: JSON.stringify(data) }),
 
   loadFromFolder: (folderPath: string, orderId: number, parts: { id: number; part_number: string; needsPDF: boolean; needsDWG: boolean; needsSTP: boolean }[]) =>
@@ -356,10 +386,34 @@ export const partsApi = {
       body: JSON.stringify({ phase_id: phaseId }),
     }),
 
+  updateProgram: (partId: number, value: boolean) =>
+    request<{ ok: boolean }>(`/parts/${partId}/program`, {
+      method: 'PATCH',
+      body: JSON.stringify({ value }),
+    }),
+
   updatePaths: (partId: number, paths: { PDF_path?: string | null; DWG_path?: string | null; STP_path?: string | null }) =>
     request<{ ok: boolean }>(`/parts/${partId}/paths`, {
       method: 'PATCH',
       body: JSON.stringify(paths),
+    }),
+
+  updateBasic: (partId: number, data: { part_number: string; name: string; quantity_right: number; deadline_at: string | null }) =>
+    request<{ ok: boolean }>(`/parts/${partId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  updateField: (partId: number, key: 'producer' | 'comment', value: string) =>
+    request<{ ok: boolean }>(`/parts/${partId}/field`, {
+      method: 'PATCH',
+      body: JSON.stringify({ key, value }),
+    }),
+
+  syncSoftlab: (orderId: number, nagId: string) =>
+    request<{ updated: number }>('/parts/sync-softlab', {
+      method: 'POST',
+      body: JSON.stringify({ orderId, nagId }),
     }),
 }
 
@@ -368,7 +422,9 @@ export interface CommercialPart {
   part_id:         number
   numer_zlecenia:  string
   nr_detalu:       string
+  nazwa_detalu:    string
   ilosc:           number
+  quantity_left:   number
   data_zamowienia: string | null
   data_dostawy:    string | null
   status_num:      0 | 1 | 2
@@ -473,4 +529,18 @@ export const dialogApi = {
     request<{ path: string | null }>(`/dialog/select-file?ext=${ext}${initialDir ? `&initialDir=${encodeURIComponent(initialDir)}` : ''}`),
   openFolder:   (folderPath: string) =>
     request<{ ok: boolean }>('/dialog/open-folder', { method: 'POST', body: JSON.stringify({ path: folderPath }) }),
+
+  listPdfs: (folder: string) =>
+    request<{ files: Array<{ name: string; pdf_path: string; dwg_path: string | null; stp_path: string | null; compound_key: string | null }> }>(
+      `/dialog/list-pdfs?folder=${encodeURIComponent(folder)}`
+    ),
+
+  readExcel: (filePath: string) =>
+    request<{ rows: Array<{ numer_detalu: string; material: string; kop1: string; kop2: string }> }>(
+      `/dialog/read-excel?path=${encodeURIComponent(filePath)}`
+    ),
+}
+
+export const importApi = {
+  run: () => request<{ added: number; exitCode?: number; error?: string; output?: string }>('/import/run', { method: 'POST' }),
 }

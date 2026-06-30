@@ -71,9 +71,8 @@ interface Row {
 }
 
 function calcIlosc(p: { quantity_right: number; quantity_left: number }): string {
-  if (p.quantity_right === 0) return String(p.quantity_left)
-  if (p.quantity_left  === 0) return String(p.quantity_right)
-  return `${p.quantity_right}+${p.quantity_left}`
+  if (p.quantity_left === 0) return String(p.quantity_right)
+  return `${p.quantity_right} + ${p.quantity_left}L`
 }
 
 function parseIlosc(s: string): number {
@@ -362,7 +361,7 @@ export default function HomePage() {
   ]
 
   // Filtrowanie kolumnowe (Lp.–Ilość = 0-5)
-  const FILTER_COLS = new Set([1, 2, 3, 4, 5])
+  const FILTER_COLS = new Set([1, 2, 3, 4, 5, 15, 16, 17])
   const colFiltered = Object.entries(colFilters).reduce((acc, [col, val]) => {
     if (!val?.trim()) return acc
     const field = COL_FIELDS_SORT[Number(col)]
@@ -444,6 +443,7 @@ export default function HomePage() {
         e.preventDefault()
         const row = visible[r]
         if (!row) break
+        if (row.phase_name === 'D100' || row.phase_name === 'D102') break
         // kolumny operacji (6–14)
         const opIdx = c - 6
         if (opIdx >= 0 && opIdx < OP_KEYS.length) {
@@ -671,9 +671,28 @@ export default function HomePage() {
                       )
                     })}
                     {OP_KEYS.map((k, i) => <th key={k} style={thS(undefined, active?.c === 6 + i)}>{OP_LABELS[k]}</th>)}
-                    <th style={thS(undefined, active?.c === 15)}>Kop. 1</th>
-                    <th style={thS(undefined, active?.c === 16)}>Kop. 2</th>
-                    <th style={thS(undefined, active?.c === 17)}>Kop. 3</th>
+                    {(['Kop. 1', 'Kop. 2', 'Kop. 3'] as const).map((label, i) => {
+                      const ci = 15 + i
+                      const hasFilter = !!colFilters[ci]?.trim()
+                      return (
+                        <th key={ci} style={thS(undefined, active?.c === ci)}>
+                          <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:2 }}>
+                            {label}
+                            <span
+                              title="Filtruj"
+                              onClick={e => openFilter(ci, e)}
+                              style={{
+                                display:'inline-flex', alignItems:'center', justifyContent:'center',
+                                padding:'1px 3px', borderRadius:3,
+                                background: hasFilter ? '#2563eb' : 'transparent',
+                                color: hasFilter ? '#fff' : '#94a3b8',
+                                fontSize:10, lineHeight:1, cursor:'pointer', flexShrink:0,
+                              }}
+                            >▽</span>
+                          </span>
+                        </th>
+                      )
+                    })}
                     <th
                       style={{ ...thS(undefined, active?.c === 18), cursor:'pointer' }}
                       onClick={e => toggleSort(18, e)}
@@ -792,9 +811,32 @@ export default function HomePage() {
                           />
                         </td>
                       ))}
-                      {Array.from({ length: N_COLS - 6 }).map((_, i) => (
-                        <td key={i} style={{ background:'#eff6ff', borderRight:BORDER, borderBottom:BORDER }} />
-                      ))}
+                      {Array.from({ length: N_COLS - 6 }).map((_, i) => {
+                        const ci = 6 + i
+                        if (ci >= 15 && ci <= 17) {
+                          return (
+                            <td key={i} style={{ background:'#eff6ff', borderRight:BORDER, borderBottom:BORDER, padding:'2px 4px' }}>
+                              <input
+                                ref={filterCol === ci ? filterInputRef : null}
+                                value={colFilters[ci] ?? ''}
+                                onChange={e => setColFilters(f => ({ ...f, [ci]: e.target.value }))}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter')  { setShowFilterRow(false) }
+                                  if (e.key === 'Escape') { setColFilters(f => { const n = { ...f }; delete n[ci]; return n }); setShowFilterRow(false) }
+                                }}
+                                placeholder="Szukaj..."
+                                style={{
+                                  width:'100%', boxSizing:'border-box',
+                                  border:'1px solid #93c5fd', borderRadius:3,
+                                  padding:'2px 6px', fontSize:12, outline:'none',
+                                  background:'#fff',
+                                }}
+                              />
+                            </td>
+                          )
+                        }
+                        return <td key={i} style={{ background:'#eff6ff', borderRight:BORDER, borderBottom:BORDER }} />
+                      })}
                     </tr>
                   )}
                 </thead>
@@ -802,22 +844,32 @@ export default function HomePage() {
                 <tbody>
                   {visible.map((row, ri) => {
                     const isRowActive = active?.r === ri
-                    const ca    = (ci: number) => isRowActive && active?.c === ci
-                    const rowBg = isRowActive ? BG_ROW : ri % 2 === 0 ? '#fff' : '#f8fafc'
+                    const ca       = (ci: number) => isRowActive && active?.c === ci
+                    const isWycofane  = row.phase_name === 'D101'
+                    const isAnulowany = row.phase_name === 'D100'
+                    const isWstrzymany = row.phase_name === 'D102'
+                    const isBlocked = isAnulowany || isWstrzymany
+                    const rowBg = isRowActive ? BG_ROW : isWycofane ? '#e5e7eb' : isAnulowany ? '#f3f4f6' : ri % 2 === 0 ? '#fff' : '#f8fafc'
                     const bg    = (ci: number) => ca(ci) ? BG_CELL : rowBg
                     const act   = (ci: number) => ({ onClick: () => setActive({ r: ri, c: ci }) })
+                    const STRIKE_GR = 'linear-gradient(#374151, #374151) center/100% 1px no-repeat'
+                    const strike = (s: React.CSSProperties): React.CSSProperties => {
+                      if (!isAnulowany) return s
+                      const base = (s.background as string | undefined) ?? (s.backgroundColor as string | undefined) ?? '#fff'
+                      return { ...s, background: `${STRIKE_GR}, ${base}` }
+                    }
 
                     return (
                       <tr key={row._key}>
                         <td style={stickyTd(S_LP,   ca(0), bg(0), { color:'#94a3b8', fontSize:11 })} {...act(0)}>{row.lp}</td>
-                        <td style={stickyTd(S_ZLEC, ca(1), bg(1))} {...act(1)}>{row.numer_zlecenia}</td>
-                        <td style={stickyTd(S_TERM, ca(2), bg(2))} {...act(2)}>{row.termin_wyk}</td>
+                        <td style={strike(stickyTd(S_ZLEC, ca(1), bg(1)))} {...act(1)}>{row.numer_zlecenia}</td>
+                        <td style={strike(stickyTd(S_TERM, ca(2), bg(2)))} {...act(2)}>{row.termin_wyk}</td>
                         <td
-                          style={stickyTd(S_DETAL, ca(3), bg(3), { color:'#2563eb', fontWeight:600, cursor:'pointer' })}
+                          style={strike(stickyTd(S_DETAL, ca(3), bg(3), { color:'#2563eb', fontWeight:600, cursor:'pointer' }))}
                           onClick={e => { e.stopPropagation(); setActive({ r:ri, c:3 }); setDetailPartId(row.part_id) }}
                         >{row.numer_detalu}</td>
-                        <td style={stickyTd(S_NAZWA, ca(4), bg(4))} {...act(4)}>{row.nazwa_detalu}</td>
-                        <td style={stickyTd(S_ILOSC, ca(5), bg(5))} {...act(5)}>{row.ilosc}</td>
+                        <td style={strike(stickyTd(S_NAZWA, ca(4), bg(4)))} {...act(4)}>{row.nazwa_detalu}</td>
+                        <td style={strike(stickyTd(S_ILOSC, ca(5), bg(5)))} {...act(5)}>{row.ilosc}</td>
 
                         {OP_KEYS.map((k, opIdx) => {
                           const ci      = 6 + opIdx
@@ -829,14 +881,14 @@ export default function HomePage() {
                           return (
                             <td
                               key={k}
-                              style={tdS(ca(ci), cellBg, {
+                              style={strike(tdS(ca(ci), cellBg, {
                                 color: cellTxt,
                                 fontWeight: clr ? 700 : 400,
                                 cursor: val && opId ? 'pointer' : undefined,
-                              })}
+                              }))}
                               {...act(ci)}
                               onDoubleClick={() => {
-                                if (!val || !opId) return
+                                if (!val || !opId || isBlocked) return
                                 const newClr = COLOR_CYCLE[clr || 'r']
                                 setRows(prev => prev.map(r => {
                                   if (r._key !== row._key) return r
@@ -862,14 +914,14 @@ export default function HomePage() {
                           return (
                             <td
                               key={f}
-                              style={tdS(ca(ci), cellBg, {
+                              style={strike(tdS(ca(ci), cellBg, {
                                 color: cellTxt,
                                 fontWeight: clr ? 700 : 400,
                                 cursor: val ? 'pointer' : undefined,
-                              })}
+                              }))}
                               {...act(ci)}
                               onDoubleClick={() => {
-                                if (!val) return
+                                if (!val || isBlocked) return
                                 const newClr = COLOR_CYCLE[clr || 'r']
                                 setRows(prev => prev.map(ro => {
                                   if (ro._key !== row._key) return ro
@@ -887,7 +939,7 @@ export default function HomePage() {
                           const ci  = 18 + i
                           const val = row[f] as string
                           const disp = f === 'phase_name' ? (PHASE_LABELS[val] ?? val) : val
-                          return <td key={String(f)} style={tdS(ca(ci), bg(ci))} {...act(ci)}>{disp}</td>
+                          return <td key={String(f)} style={f === 'phase_name' ? tdS(ca(ci), bg(ci)) : strike(tdS(ca(ci), bg(ci)))} {...act(ci)}>{disp}</td>
                         })}
                       </tr>
                     )

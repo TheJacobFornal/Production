@@ -8,6 +8,7 @@ export interface Order {
   all_drawings: boolean
   barcode: string | null
   phase_id: number | null
+  typ_zamowienia: string | null
 }
 
 export interface Part {
@@ -27,6 +28,9 @@ export interface Part {
   finished_at: string | null
   rework_parent_part_id: number | null
   deadline_at: string | null
+  program: boolean
+  producer: string | null
+  comment:  string | null
 }
 
 export interface OrderListItem {

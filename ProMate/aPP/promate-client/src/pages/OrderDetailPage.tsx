@@ -229,9 +229,8 @@ function stickyTdBase(col: ColDef, bg: string): React.CSSProperties {
 type Row = Record<string, string>
 
 function calcIlosc(p: PartWithOrder): string {
-  if (p.quantity_right === 0) return String(p.quantity_left)
-  if (p.quantity_left  === 0) return String(p.quantity_right)
-  return `${p.quantity_right}+${p.quantity_left}`
+  if (p.quantity_left === 0) return String(p.quantity_right)
+  return `${p.quantity_right} + ${p.quantity_left}L`
 }
 
 function parseIlosc(s: string): number {

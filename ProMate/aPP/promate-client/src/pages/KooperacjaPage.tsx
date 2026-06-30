@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { cooperationLogApi, KoopPanelRow } from '../services/api'
+import { PartDetailContent } from './PartDetailPage'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type KoopStatus = 'Gotowe do koop.' | 'W trakcie' | 'Skończone'
-type SortKey = 'order_number' | 'part_number' | 'quantity' | 'cooperation_name' | 'sent_at' | 'received_at' | 'phase_name'
+type SortKey = 'order_number' | 'part_number' | 'part_name' | 'quantity' | 'cooperation_name' | 'sent_at' | 'received_at' | 'phase_name'
 type SortDir = 'asc' | 'desc'
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
@@ -93,11 +94,14 @@ function DateInput({ value, onSave, disabled }: DateInputProps) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+const BORDER = '1px solid #d1d5db'
+const BLUE   = '#1e40af'
+
 const filterInput: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box',
-  border: '1px solid #93c5fd', borderRadius: 3,
-  padding: '3px 7px', fontSize: 12, outline: 'none',
-  background: '#f0f9ff', color: '#1e40af',
+  border: BORDER, borderRadius: 0,
+  padding: '4px 8px', fontSize: 13, outline: 'none',
+  background: '#fff', color: '#0f172a',
 }
 
 function StatusBadge({ status }: { status: KoopStatus }) {
@@ -125,7 +129,8 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
 const COLS: { label: string; key: SortKey | null; width: number; align: 'center' | 'left'; filterable?: boolean }[] = [
   { label: 'Lp.',            key: null,               width: 44,  align: 'center' },
   { label: 'Numer Zlecenia', key: 'order_number',     width: 150, align: 'left', filterable: true },
-  { label: 'Nr Detalu',      key: 'part_number',      width: 180, align: 'left', filterable: true },
+  { label: 'Nr Detalu',      key: 'part_number',      width: 160, align: 'left', filterable: true },
+  { label: 'Nazwa Detalu',   key: 'part_name',        width: 160, align: 'left', filterable: true },
   { label: 'Ilość',          key: 'quantity',         width: 70,  align: 'center' },
   { label: 'Kooperacja',     key: 'cooperation_name', width: 150, align: 'left', filterable: true },
   { label: 'Data Wyjazdu',   key: 'sent_at',          width: 140, align: 'center' },
@@ -136,6 +141,7 @@ const COLS: { label: string; key: SortKey | null; width: number; align: 'center'
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function KooperacjaPage() {
+  const [detailPartId, setDetailPartId] = useState<number | null>(null)
   const [rows,    setRows]    = useState<KoopPanelRow[]>([])
   const [loading, setLoading] = useState(true)
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
@@ -143,6 +149,7 @@ export default function KooperacjaPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [fZlecenia,   setFZlecenia]   = useState('')
   const [fDetalu,     setFDetalu]     = useState('')
+  const [fNazwa,      setFNazwa]      = useState('')
   const [fKoop,       setFKoop]       = useState('')
   const [fStatus,     setFStatus]     = useState<KoopStatus | 'Wszystkie'>('Wszystkie')
 
@@ -176,9 +183,10 @@ export default function KooperacjaPage() {
     rows.filter(r =>
       r.order_number.toLowerCase().includes(fZlecenia.toLowerCase()) &&
       r.part_number.toLowerCase().includes(fDetalu.toLowerCase()) &&
+      r.part_name.toLowerCase().includes(fNazwa.toLowerCase()) &&
       r.cooperation_name.toLowerCase().includes(fKoop.toLowerCase()) &&
       (fStatus === 'Wszystkie' || getStatus(r.phase_name) === fStatus)
-    ), [rows, fZlecenia, fDetalu, fKoop, fStatus])
+    ), [rows, fZlecenia, fDetalu, fNazwa, fKoop, fStatus])
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered
@@ -196,7 +204,19 @@ export default function KooperacjaPage() {
     </div>
   )
 
+  const TH: React.CSSProperties = {
+    background: '#e8edf2', color: '#374151', fontWeight: 700, fontSize: 11,
+    padding: '10px 14px', border: BORDER, textAlign: 'center',
+    whiteSpace: 'nowrap', userSelect: 'none', letterSpacing: '0.03em',
+    textTransform: 'uppercase' as const,
+  }
+  const TD: React.CSSProperties = {
+    border: BORDER, padding: '9px 14px', fontSize: 13,
+    color: '#1e293b', textAlign: 'center',
+  }
+
   return (
+    <>
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#fff', overflow: 'hidden' }}>
 
       {/* ── Nagłówek ── */}
@@ -228,45 +248,34 @@ export default function KooperacjaPage() {
 
       {/* ── Tabela ── */}
       <div style={{ flex: 1, overflow: 'auto', padding: '0 28px 24px' }}>
-        <div style={{ maxWidth: '90%', margin: '0 auto' }}>
-          <table className="w-full text-sm" style={{ borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <div style={{ maxWidth: 1260, margin: '0 auto', background: '#fff', border: BORDER, borderTop: `3px solid ${BLUE}` }}>
+          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: '100%' }}>
             <colgroup>
               {COLS.map((c, i) => <col key={i} style={{ width: c.width }} />)}
             </colgroup>
 
-            <thead>
-              <tr className="bg-blue-100 text-blue-700">
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+              <tr>
                 {COLS.map((col, i) => {
                   const hasActiveFilter =
                     (i === 1 && !!fZlecenia) ||
                     (i === 2 && !!fDetalu)   ||
-                    (i === 4 && !!fKoop)
+                    (i === 3 && !!fNazwa)    ||
+                    (i === 5 && !!fKoop)
                   return (
-                    <th
-                      key={i}
-                      onClick={() => toggleSort(col.key)}
-                      className="border border-gray-300"
-                      style={{
-                        padding: '8px 12px', textAlign: col.align, fontWeight: 700,
-                        cursor: col.key ? 'pointer' : 'default',
-                        userSelect: 'none', whiteSpace: 'nowrap',
-                      }}
-                    >
-                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 2 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 3, flex: 1, justifyContent: 'center' }}>
-                          {col.label}
-                          {col.key && <SortIcon active={sortKey === col.key} dir={sortDir} />}
-                        </span>
+                    <th key={i} onClick={() => toggleSort(col.key)} style={{ ...TH, cursor: col.key ? 'pointer' : 'default' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                        {col.label}
+                        {col.key && <SortIcon active={sortKey === col.key} dir={sortDir} />}
                         {col.filterable && (
                           <span
-                            title="Filtruj"
                             onClick={e => { e.stopPropagation(); setShowFilters(v => !v) }}
                             style={{
                               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                              padding: '1px 3px', borderRadius: 3, flexShrink: 0,
-                              background: hasActiveFilter ? '#2563eb' : 'transparent',
+                              padding: '1px 4px', flexShrink: 0,
+                              background: hasActiveFilter ? BLUE : 'transparent',
                               color: hasActiveFilter ? '#fff' : '#93c5fd',
-                              fontSize: 10, lineHeight: 1, cursor: 'pointer',
+                              fontSize: 10, cursor: 'pointer',
                             }}
                           >▽</span>
                         )}
@@ -277,21 +286,16 @@ export default function KooperacjaPage() {
               </tr>
 
               {showFilters && (
-                <tr className="bg-white">
-                  <td className="border border-gray-300 px-1 py-1" />
-                  <td className="border border-gray-300 px-1 py-1">
-                    <input style={filterInput} placeholder="Szukaj..." value={fZlecenia} onChange={e => setFZlecenia(e.target.value)} />
-                  </td>
-                  <td className="border border-gray-300 px-1 py-1">
-                    <input style={filterInput} placeholder="Szukaj..." value={fDetalu} onChange={e => setFDetalu(e.target.value)} />
-                  </td>
-                  <td className="border border-gray-300 px-1 py-1" />
-                  <td className="border border-gray-300 px-1 py-1">
-                    <input style={filterInput} placeholder="Szukaj..." value={fKoop} onChange={e => setFKoop(e.target.value)} />
-                  </td>
-                  <td className="border border-gray-300 px-1 py-1" />
-                  <td className="border border-gray-300 px-1 py-1" />
-                  <td className="border border-gray-300 px-1 py-1" />
+                <tr style={{ background: '#f8fafc' }}>
+                  <td style={{ ...TD, padding: 4 }} />
+                  <td style={{ ...TD, padding: 4 }}><input style={filterInput} placeholder="Szukaj..." value={fZlecenia} onChange={e => setFZlecenia(e.target.value)} /></td>
+                  <td style={{ ...TD, padding: 4 }}><input style={filterInput} placeholder="Szukaj..." value={fDetalu}   onChange={e => setFDetalu(e.target.value)}   /></td>
+                  <td style={{ ...TD, padding: 4 }}><input style={filterInput} placeholder="Szukaj..." value={fNazwa}    onChange={e => setFNazwa(e.target.value)}    /></td>
+                  <td style={{ ...TD, padding: 4 }} />
+                  <td style={{ ...TD, padding: 4 }}><input style={filterInput} placeholder="Szukaj..." value={fKoop}     onChange={e => setFKoop(e.target.value)}     /></td>
+                  <td style={{ ...TD, padding: 4 }} />
+                  <td style={{ ...TD, padding: 4 }} />
+                  <td style={{ ...TD, padding: 4 }} />
                 </tr>
               )}
             </thead>
@@ -299,14 +303,23 @@ export default function KooperacjaPage() {
             <tbody>
               {sorted.map((row, idx) => {
                 const status = getStatus(row.phase_name)
+                const rowBg  = idx % 2 === 0 ? '#fff' : '#fafafa'
                 return (
-                  <tr key={`${row.part_id}-${row.slot}`} className="hover:bg-blue-50">
-                    <td className="border border-gray-300 px-3 py-2 text-center font-medium text-gray-700">{idx + 1}</td>
-                    <td className="border border-gray-300 px-3 py-2 text-center font-medium text-gray-900">{row.order_number}</td>
-                    <td className="border border-gray-300 px-3 py-2 text-center font-medium text-blue-600">{row.part_number}</td>
-                    <td className="border border-gray-300 px-3 py-2 text-center font-medium">{row.quantity}</td>
-                    <td className="border border-gray-300 px-3 py-2 text-center font-medium text-gray-800">{row.cooperation_name}</td>
-                    <td className="border border-gray-300 px-1 py-1 text-center">
+                  <tr key={`${row.part_id}-${row.slot}`}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#f0f4ff')}
+                    onMouseLeave={e => (e.currentTarget.style.background = rowBg)}
+                    style={{ background: rowBg }}
+                  >
+                    <td style={{ ...TD, color: '#9ca3af', fontWeight: 500, fontSize: 12 }}>{idx + 1}</td>
+                    <td style={{ ...TD, fontWeight: 500 }}>{row.order_number}</td>
+                    <td
+                      style={{ ...TD, color: BLUE, fontWeight: 600, cursor: 'pointer' }}
+                      onClick={() => setDetailPartId(row.part_id)}
+                    >{row.part_number}</td>
+                    <td style={{ ...TD, textAlign: 'left', fontWeight: 500 }}>{row.part_name}</td>
+                    <td style={{ ...TD, fontWeight: 600 }}>{row.quantity_left > 0 ? `${row.quantity_right} + ${row.quantity_left}L` : String(row.quantity_right)}</td>
+                    <td style={{ ...TD, fontWeight: 500 }}>{row.cooperation_name}</td>
+                    <td style={{ ...TD, padding: '2px 6px' }}>
                       <DateInput
                         value={row.sent_at}
                         disabled={status === 'Gotowe do koop.'}
@@ -318,7 +331,7 @@ export default function KooperacjaPage() {
                         }}
                       />
                     </td>
-                    <td className="border border-gray-300 px-1 py-1 text-center">
+                    <td style={{ ...TD, padding: '2px 6px' }}>
                       <DateInput
                         value={row.received_at}
                         disabled={status === 'Gotowe do koop.' || status === 'W trakcie'}
@@ -330,13 +343,10 @@ export default function KooperacjaPage() {
                         }}
                       />
                     </td>
-                    <td className="border border-gray-300 px-3 py-2 text-center">
+                    <td style={{ ...TD }}>
                       <button
                         onClick={() => cycleStatus(row)}
-                        style={{
-                          background: 'none', border: 'none', padding: 0,
-                          cursor: status === 'Skończone' ? 'default' : 'pointer',
-                        }}
+                        style={{ background: 'none', border: 'none', padding: 0, cursor: status === 'Skończone' ? 'default' : 'pointer' }}
                       >
                         <StatusBadge status={status} />
                       </button>
@@ -347,7 +357,7 @@ export default function KooperacjaPage() {
 
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="border border-gray-300 text-center py-6 text-gray-400">
+                  <td colSpan={9} style={{ ...TD, color: '#9ca3af', padding: '24px', fontStyle: 'italic' }}>
                     Brak wpisów
                   </td>
                 </tr>
@@ -357,5 +367,15 @@ export default function KooperacjaPage() {
         </div>
       </div>
     </div>
+
+    {detailPartId && (
+      <div style={{ position: 'fixed', top: 0, left: 56, right: 0, bottom: 0, zIndex: 300, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <PartDetailContent
+          part_id={detailPartId}
+          onClose={() => setDetailPartId(null)}
+        />
+      </div>
+    )}
+    </>
   )
 }

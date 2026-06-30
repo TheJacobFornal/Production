@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ordersApi } from '../services/api'
+import { ordersApi, importApi } from '../services/api'
 import { OrderListItem } from '../types'
 
 // ─── Pasek postępu ────────────────────────────────────────────────────────────
@@ -47,21 +47,23 @@ function SortIcon({ col, sortCol, sortDir }: { col: SortCol; sortCol: SortCol | 
 // ─── Etykiety faz zamówienia ──────────────────────────────────────────────────
 
 const PHASE_LABELS: Record<string, string> = {
-  Z2: 'Nowe',
-  Z3: 'Zaplanowane',
-  Z4: 'Gotowe do produkcji',
-  Z5: 'W produkcji',
-  Z6: 'Wyprodukowane',
-  Z7: 'Wycenione',
+  Z2:   'Nowe',
+  Z3:   'Zaplanowane',
+  Z4:   'Gotowe do produkcji',
+  Z5:   'W produkcji',
+  Z6:   'Wyprodukowane',
+  Z7:   'Wycenione',
+  Z100: 'Anulowane',
 }
 
 const PHASE_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  Z2: { bg: '#f1f5f9', text: '#475569', dot: '#94a3b8' },
-  Z3: { bg: '#fef9c3', text: '#854d0e', dot: '#eab308' },
-  Z4: { bg: '#dbeafe', text: '#1d4ed8', dot: '#3b82f6' },
-  Z5: { bg: '#ffedd5', text: '#c2410c', dot: '#f97316' },
-  Z6: { bg: '#dcfce7', text: '#15803d', dot: '#22c55e' },
-  Z7: { bg: '#f3e8ff', text: '#7e22ce', dot: '#a855f7' },
+  Z2:   { bg: '#f1f5f9', text: '#475569', dot: '#94a3b8' },
+  Z3:   { bg: '#fef9c3', text: '#854d0e', dot: '#eab308' },
+  Z4:   { bg: '#dbeafe', text: '#1d4ed8', dot: '#3b82f6' },
+  Z5:   { bg: '#ffedd5', text: '#c2410c', dot: '#f97316' },
+  Z6:   { bg: '#dcfce7', text: '#15803d', dot: '#22c55e' },
+  Z7:   { bg: '#f3e8ff', text: '#7e22ce', dot: '#a855f7' },
+  Z100: { bg: '#FF5656', text: '#fff', dot: '#fff' },
 }
 
 // ─── Input filtra ─────────────────────────────────────────────────────────────
@@ -81,6 +83,33 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
 
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newOrderNum,  setNewOrderNum]  = useState('')
+  const [newRodzaj,    setNewRodzaj]    = useState<'wew' | 'zew'>('wew')
+
+  const [importing,    setImporting]    = useState(false)
+  const [importResult, setImportResult] = useState<{ added: number; error?: string } | null>(null)
+
+  const handleImport = () => {
+    setImporting(true)
+    setImportResult(null)
+    importApi.run()
+      .then(res => {
+        console.log('[Import] odpowiedź backendu:', res)
+        console.log('[Import] output exe:\n', res.output)
+        setImportResult({ added: res.added, error: res.error })
+        if (!res.error) fetchOrders()
+      })
+      .catch(() => setImportResult({ added: -1, error: 'Błąd połączenia z serwerem' }))
+      .finally(() => setImporting(false))
+  }
+
+  const handleCreate = () => {
+    if (!newOrderNum.trim()) return
+    setShowAddModal(false)
+    navigate(`/orders/nowe/${encodeURIComponent(newOrderNum.trim())}`, { state: { rodzaj: newRodzaj } })
+  }
+
   // Filtry per kolumna
   const [showFilters,  setShowFilters]  = useState(false)
   const [fNumer,       setFNumer]       = useState('')
@@ -99,12 +128,14 @@ export default function OrdersPage() {
   const [sortCol, setSortCol] = useState<SortCol | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
-  useEffect(() => {
+  const fetchOrders = () => {
+    setError(null)
     ordersApi.getSummaryList()
-      .then(data => setOrders(data))
-      .catch(() => setError('Nie można pobrać zamówień'))
-      .finally(() => setLoading(false))
-  }, [])
+      .then(data => { setOrders(data); setLoading(false) })
+      .catch(() => { setError('Nie można pobrać zamówień'); setLoading(false) })
+  }
+
+  useEffect(() => { fetchOrders() }, [])
 
   // Zamknij dropdown po kliknięciu poza
   useEffect(() => {
@@ -179,6 +210,125 @@ export default function OrdersPage() {
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#1f2937' }}>Zamówienia</h1>
         <img src="/Logo.png" alt="ProMate" className="h-24 object-contain" />
       </div>
+
+      {/* Przyciski */}
+      <div className="max-w-4xl mx-auto mb-3" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            onClick={handleImport}
+            disabled={importing}
+            style={{
+              background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6,
+              padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: importing ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6, opacity: importing ? 0.6 : 1,
+            }}
+          >
+            {importing ? '⏳ Odświeżam...' : '↻ Odśwież zamówienia'}
+          </button>
+          {importResult && (
+            <span
+              title={importResult.error ?? undefined}
+              style={{
+                fontSize: 13, fontWeight: 600, padding: '5px 12px', borderRadius: 6,
+                cursor: importResult.error ? 'help' : 'default',
+                background: importResult.error ? '#fee2e2' : importResult.added === 0 ? '#f1f5f9' : '#dcfce7',
+                color:      importResult.error ? '#dc2626' : importResult.added === 0 ? '#64748b' : '#15803d',
+              }}
+            >
+              {importResult.error
+                ? `✕ ${importResult.error}`
+                : importResult.added === 0
+                  ? 'Brak nowych zamówień'
+                  : `✓ Dodano ${importResult.added} zamówień`}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => { setShowAddModal(true); setNewOrderNum('') }}
+          style={{
+            background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 6,
+            padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          + Dodaj zamówienie
+        </button>
+      </div>
+
+      {/* Modal: nowe zamówienie */}
+      {showAddModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)',
+          zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+          onClick={() => setShowAddModal(false)}
+        >
+          <div
+            style={{
+              background: '#fff', borderRadius: 10, padding: '28px 32px', width: 360,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 style={{ margin: '0 0 18px', fontSize: 17, fontWeight: 700, color: '#1f2937' }}>
+              Nowe zamówienie
+            </h2>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Numer zlecenia
+            </label>
+            <input
+              autoFocus
+              value={newOrderNum}
+              onChange={e => setNewOrderNum(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setShowAddModal(false) }}
+              placeholder="np. 252603-IX92-06"
+              style={{
+                width: '100%', boxSizing: 'border-box', border: '1px solid #d1d5db', borderRadius: 6,
+                padding: '8px 12px', fontSize: 14, outline: 'none', marginBottom: 16,
+              }}
+            />
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 8 }}>
+              Rodzaj zamówienia
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(['wew', 'zew'] as const).map(val => (
+                <button
+                  key={val}
+                  onClick={() => setNewRodzaj(val)}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 6, fontSize: 14, cursor: 'pointer',
+                    border: newRodzaj === val ? 'none' : '1px solid #d1d5db',
+                    background: newRodzaj === val ? '#1d4ed8' : '#f9fafb',
+                    color: newRodzaj === val ? '#fff' : '#374151',
+                    fontWeight: newRodzaj === val ? 700 : 400,
+                  }}
+                >
+                  {val === 'wew' ? 'Wewnętrzne' : 'Zewnętrzne'}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowAddModal(false)}
+                style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid #d1d5db', background: '#f9fafb', fontSize: 13, cursor: 'pointer' }}
+              >
+                Anuluj
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={!newOrderNum.trim()}
+                style={{
+                  padding: '7px 18px', borderRadius: 6, border: 'none',
+                  background: newOrderNum.trim() ? '#1d4ed8' : '#93c5fd',
+                  color: '#fff', fontSize: 13, fontWeight: 600, cursor: newOrderNum.trim() ? 'pointer' : 'default',
+                }}
+              >
+                Dalej →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabela */}
       <div className="max-w-4xl mx-auto">
@@ -269,13 +419,18 @@ export default function OrdersPage() {
                 </tr>
               ) : (
                 display.map((order, i) => {
-                  const hasMissing = order.missing_drawings_count > 0
+                  const hasMissing   = order.missing_drawings_count > 0
+                  const isCancelled  = order.phase_name === 'Z100'
+                  const isInProd     = order.phase_name === 'Z5' || order.phase_name === 'Z4'
+                  const isDone       = order.phase_name === 'Z6'
+                  const defaultBg    = isCancelled ? '#fee2e2' : isInProd ? '#FFE8D0' : isDone ? '#C8FDB7' : hasMissing ? '#f3f4f6' : undefined
+                  const hoverBg      = isCancelled ? '#fecaca' : isInProd ? '#ffd8b8' : isDone ? '#b2f59e' : hasMissing ? '#e5e7eb' : '#eff6ff'
                   return (
                   <tr key={order.order_number}
-                    style={{ background: hasMissing ? '#fff7ed' : undefined }}
+                    style={{ background: defaultBg }}
                     className="cursor-pointer"
-                    onMouseEnter={e => (e.currentTarget.style.background = hasMissing ? '#fed7aa' : '#eff6ff')}
-                    onMouseLeave={e => (e.currentTarget.style.background = hasMissing ? '#fff7ed' : '')}
+                    onMouseEnter={e => (e.currentTarget.style.background = hoverBg)}
+                    onMouseLeave={e => (e.currentTarget.style.background = defaultBg ?? '')}
                     onClick={() => navigate(`/orders/${encodeURIComponent(order.order_number)}`)}>
                     <td className="border border-gray-300 px-3 py-2 text-center">{i + 1}</td>
                     <td className="border border-gray-300 px-3 py-2 text-center font-medium text-blue-600 hover:underline">
@@ -345,31 +500,41 @@ export default function OrdersPage() {
           {allStatuses.length === 0 && (
             <div style={{ padding: '6px 12px', fontSize: 12, color: '#9ca3af' }}>Brak statusów</div>
           )}
-          {allStatuses.map(s => (
-            <label
-              key={s}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '5px 12px', cursor: 'pointer', fontSize: 13,
-                background: statusFilter.has(s) ? '#eff6ff' : 'transparent',
-              }}
-              onClick={e => { e.stopPropagation(); toggleStatus(s) }}
-            >
-              <input
-                type="checkbox"
-                readOnly
-                checked={statusFilter.has(s)}
-                style={{ accentColor: '#2563eb', width: 14, height: 14, flexShrink: 0 }}
-              />
-              <span style={{
-                display: 'inline-block', padding: '1px 7px', borderRadius: 4,
-                background: '#dbeafe', color: '#1e40af',
-                fontSize: 11, fontWeight: 700,
-              }}>
-                {s}
-              </span>
-            </label>
-          ))}
+          {(() => {
+            const labelToKey = Object.fromEntries(Object.entries(PHASE_LABELS).map(([k, v]) => [v, k]))
+            return allStatuses.map(s => {
+              const phaseKey = labelToKey[s]
+              const colors   = phaseKey ? PHASE_COLORS[phaseKey] : undefined
+              return (
+                <label
+                  key={s}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '5px 12px', cursor: 'pointer', fontSize: 13,
+                    background: statusFilter.has(s) ? '#f1f5f9' : 'transparent',
+                  }}
+                  onClick={e => { e.stopPropagation(); toggleStatus(s) }}
+                >
+                  <input
+                    type="checkbox"
+                    readOnly
+                    checked={statusFilter.has(s)}
+                    style={{ accentColor: '#2563eb', width: 14, height: 14, flexShrink: 0 }}
+                  />
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    padding: '2px 8px', borderRadius: 20,
+                    background: colors?.bg ?? '#dbeafe',
+                    color:      colors?.text ?? '#1e40af',
+                    fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
+                  }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors?.dot ?? '#3b82f6', flexShrink: 0 }} />
+                    {s}
+                  </span>
+                </label>
+              )
+            })
+          })()}
         </div>
       )}
     </div>

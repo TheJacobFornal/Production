@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ordersApi, operationLogsApi, OperationLog, formLogApi, FormLogDims, cooperationsApi, Cooperation, cooperationLogApi, CooperationLog, commercialApi, partsApi, PartSearchResult, PartPaths, materialsApi, Material, dialogApi } from '../services/api'
+import { ordersApi, operationLogsApi, OperationLog, formLogApi, FormLogDims, cooperationsApi, Cooperation, cooperationLogApi, CooperationLog, commercialApi, partsApi, PartSearchResult, PartPaths, materialsApi, Material, dialogApi, phasesApi } from '../services/api'
 import { Part } from '../types'
 import { loadSettings } from './SettingsPage'
+import { PartDetailContent } from './PartDetailPage'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,11 +32,14 @@ interface Row {
   suma_czasu:      string
   material:        string
   handlowka:             boolean
+  program:               boolean
   phase_id:              number | null
   przerobka:             boolean   // = !!rework_parent_part_id
   rework_parent_part_id: number | null
   oryginalny_detal:      string
   przerobka_parts:       PrzerobkaPart[]
+  producer:              string
+  comment:               string
 }
 
 // ─── Grupy kolumn ─────────────────────────────────────────────────────────────
@@ -59,11 +63,9 @@ interface ColDef {
 
 const COLS: ColDef[] = [
   { key: 'lp',             label: 'Lp.',           group: 'podstawowe', readOnly: true, stickyIdx: 0, width: 34  },
-  { key: 'numer_zlecenia', label: 'Numer Zlecenia', group: 'podstawowe', readOnly: true, stickyIdx: 1, width: 132 },
-  { key: 'termin_wyk',     label: 'Termin Wyk.',    group: 'podstawowe', readOnly: true, stickyIdx: 2, width: 78  },
-  { key: 'numer_detalu',   label: 'Numer Detalu',   group: 'podstawowe',                stickyIdx: 3, width: 127 },
-  { key: 'nazwa_detalu',   label: 'Nazwa Detalu',   group: 'podstawowe',                stickyIdx: 4, width: 148 },
-  { key: 'ilosc',          label: 'Ilość',          group: 'podstawowe',                stickyIdx: 5, width: 38  },
+  { key: 'numer_detalu',   label: 'Numer Detalu',  group: 'podstawowe', readOnly: true, stickyIdx: 1, width: 127 },
+  { key: 'nazwa_detalu',   label: 'Nazwa Detalu',  group: 'podstawowe', readOnly: true, stickyIdx: 2, width: 148 },
+  { key: 'ilosc',          label: 'Ilość',         group: 'podstawowe', readOnly: true, stickyIdx: 3, width: 65  },
   { key: 'ploter',    label: 'Ploter',    group: 'operacje', width: 70 },
   { key: 'fkg',       label: 'FKG',       group: 'operacje', width: 70 },
   { key: 'fko',       label: 'FKO',       group: 'operacje', width: 70 },
@@ -76,15 +78,18 @@ const COLS: ColDef[] = [
   { key: 'kop1',      label: 'Kop. 1',    group: 'kooperacje', width: 95 },
   { key: 'kop2',      label: 'Kop. 2',    group: 'kooperacje', width: 95 },
   { key: 'kop3',      label: 'Kop. 3',    group: 'kooperacje', width: 95 },
-  { key: 'handlowka',  label: 'Handl.',     group: 'inne', checkbox: true, width: 62 },
-  { key: 'przerobka',  label: 'Przer.',      group: 'inne', width: 62 },
+  { key: 'program',    label: 'Program',   group: 'inne', checkbox: true, width: 65 },
+  { key: 'handlowka',  label: 'Handl.',    group: 'inne', checkbox: true, width: 65 },
+  { key: 'przerobka',  label: 'Przeróbka', group: 'inne', width: 65 },
+  { key: 'wycofane',   label: 'Wycofany',  group: 'inne', width: 65 },
+  { key: 'comment', label: 'Uwagi / Producent', group: 'dodatkowe', readOnly: true, width: 130 },
 ]
 
 // ─── Kolumny z sortowaniem / filtrowaniem ─────────────────────────────────────
 
-const SORTABLE_COLS   = new Set(['numer_zlecenia','termin_wyk','numer_detalu','nazwa_detalu','ilosc',
-  'ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo','suma_czasu','material'])
-const FILTERABLE_COLS = new Set(['numer_zlecenia','termin_wyk','numer_detalu','nazwa_detalu','ilosc','material'])
+const SORTABLE_COLS   = new Set(['numer_detalu','nazwa_detalu','ilosc',
+  'ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo','suma_czasu','material','comment'])
+const FILTERABLE_COLS = new Set(['numer_detalu','nazwa_detalu','ilosc','material','comment'])
 const NUMERIC_SORT    = new Set(['ilosc','ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo'])
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -178,9 +183,8 @@ function stickyBase(col: ColDef, bg: string): React.CSSProperties {
 }
 
 function calcIlosc(p: Part): string {
-  if (p.quantity_right === 0) return String(p.quantity_left)
-  if (p.quantity_left  === 0) return String(p.quantity_right)
-  return `${p.quantity_right}+${p.quantity_left}`
+  if (p.quantity_left === 0) return String(p.quantity_right)
+  return `${p.quantity_right} + ${p.quantity_left}L`
 }
 
 function partToRow(p: Part, orderNumber: string, termin: string): Row {
@@ -190,8 +194,9 @@ function partToRow(p: Part, orderNumber: string, termin: string): Row {
     ploter: '', ploter_seq: '', fkg: '', fkg_seq: '', fko: '', fko_seq: '',
     tok: '', tok_seq: '', tokcnc: '', tokcnc_seq: '', fcnc: '', fcnc_seq: '', fcnc_robo: '', fcnc_robo_seq: '',
     kop1: '', kop2: '', kop3: '', suma_czasu: '', material: '',
+    producer: p.producer ?? '', comment: [p.comment, p.producer].map(v => (v ?? '').trim()).filter(Boolean).join(' / '),
     phase_id: p.phase_id ?? null,
-    handlowka: false, przerobka: !!p.rework_parent_part_id,
+    handlowka: false, program: !!p.program, przerobka: !!p.rework_parent_part_id,
     rework_parent_part_id: p.rework_parent_part_id ?? null,
     oryginalny_detal: '', przerobka_parts: [],
   }
@@ -205,13 +210,14 @@ interface CellProps {
   active:          boolean
   rowActive:       boolean
   editing:         boolean
+  normalBg?:       string
   onActivate:      () => void
   onStartEdit:     () => void
   onCommitAndMove: (dr: number, dc: number, val: string, autoEdit?: boolean) => void
   onCancelEdit:    () => void
 }
 
-function Cell({ col, value, active, rowActive, editing, onActivate, onStartEdit, onCommitAndMove, onCancelEdit }: CellProps) {
+function Cell({ col, value, active, rowActive, editing, normalBg, onActivate, onStartEdit, onCommitAndMove, onCancelEdit }: CellProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const doneRef  = useRef(false)
 
@@ -219,7 +225,7 @@ function Cell({ col, value, active, rowActive, editing, onActivate, onStartEdit,
     if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select() }
   }, [editing])
 
-  const bg = active ? BG_CELL_ACTIVE : rowActive ? BG_ROW_ACTIVE : '#fff'
+  const bg = active ? BG_CELL_ACTIVE : rowActive ? BG_ROW_ACTIVE : (normalBg ?? '#fff')
 
   const tdStyle: React.CSSProperties = {
     ...stickyBase(col, bg),
@@ -284,6 +290,7 @@ interface OpCellProps {
   active:          boolean
   rowActive:       boolean
   editing:         boolean
+  normalBg?:       string
   onActivate:      () => void
   onAfterSelect:   () => void   // focus kontenera bez auto-assign
   onStartEdit:     () => void
@@ -293,7 +300,7 @@ interface OpCellProps {
   onCancelEdit:    () => void
 }
 
-function OpCell({ timeVal, seqVal, usedSeqs, active, rowActive, editing, onActivate, onAfterSelect, onStartEdit, onUpdateTime, onUpdateSeq, onCommitAndMove, onCancelEdit }: OpCellProps) {
+function OpCell({ timeVal, seqVal, usedSeqs, active, rowActive, editing, normalBg, onActivate, onAfterSelect, onStartEdit, onUpdateTime, onUpdateSeq, onCommitAndMove, onCancelEdit }: OpCellProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const doneRef  = useRef(false)
 
@@ -302,7 +309,7 @@ function OpCell({ timeVal, seqVal, usedSeqs, active, rowActive, editing, onActiv
   }, [editing])
 
   const missingSeq = !!timeVal && !seqVal
-  const bg = active ? BG_CELL_ACTIVE : rowActive ? BG_ROW_ACTIVE : missingSeq ? '#fee2e2' : '#fff'
+  const bg = active ? BG_CELL_ACTIVE : rowActive ? BG_ROW_ACTIVE : missingSeq ? '#fee2e2' : (normalBg ?? '#fff')
 
   const tdStyle: React.CSSProperties = {
     height: ROW_H, padding: 0,
@@ -407,17 +414,18 @@ interface KopCellProps {
   slot:          number
   active:        boolean
   rowActive:     boolean
+  normalBg?:     string
   onActivate:    () => void
   onAfterSelect: () => void
   onUpdate:      (id: string) => void
 }
 
-function KopCell({ coopId, cooperations, invalid, invalidName, active, rowActive, onActivate, onAfterSelect, onUpdate }: KopCellProps) {
+function KopCell({ coopId, cooperations, invalid, invalidName, active, rowActive, normalBg, onActivate, onAfterSelect, onUpdate }: KopCellProps) {
   const KOP_ACTIVE = '#ede9fe'
   const KOP_ROW    = '#faf5ff'
   const KOP_RING   = '#7c3aed'
 
-  const bg = active ? KOP_ACTIVE : rowActive ? KOP_ROW : '#fff'
+  const bg = active ? KOP_ACTIVE : rowActive ? KOP_ROW : (normalBg ?? '#fff')
 
   const tdStyle: React.CSSProperties = {
     height: ROW_H, padding: 0,
@@ -478,6 +486,50 @@ function KopCell({ coopId, cooperations, invalid, invalidName, active, rowActive
   )
 }
 
+// ─── DragScrollCell ───────────────────────────────────────────────────────────
+
+function DragScrollCell({ value, active, rowActive, normalBg, onActivate }: {
+  value: string; active: boolean; rowActive: boolean; normalBg: string; onActivate: () => void
+}) {
+  const divRef  = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ startX: number; scrollLeft: number } | null>(null)
+  const bg = active ? BG_CELL_ACTIVE : rowActive ? BG_ROW_ACTIVE : normalBg
+  return (
+    <td style={{
+      height: ROW_H, padding: 0,
+      borderRight: BORDER, borderBottom: BORDER, borderTop: 'none', borderLeft: 'none',
+      boxSizing: 'border-box', background: bg,
+      outline: active ? `2px solid ${ACTIVE_RING}` : 'none', outlineOffset: -2,
+    }} onClick={onActivate}>
+      <div
+        ref={divRef}
+        title={value}
+        style={{
+          padding: '0 6px', height: ROW_H, display: 'flex', alignItems: 'center',
+          fontSize: 13, color: '#374151', whiteSpace: 'nowrap',
+          overflowX: 'auto', userSelect: 'none',
+          cursor: dragRef.current ? 'grabbing' : 'grab',
+          scrollbarWidth: 'none',
+        }}
+        data-drag-scroll=""
+        onMouseDown={e => {
+          if (!divRef.current) return
+          dragRef.current = { startX: e.pageX, scrollLeft: divRef.current.scrollLeft }
+          e.preventDefault()
+        }}
+        onMouseMove={e => {
+          if (!dragRef.current || !divRef.current) return
+          divRef.current.scrollLeft = dragRef.current.scrollLeft - (e.pageX - dragRef.current.startX)
+        }}
+        onMouseUp={() => { dragRef.current = null }}
+        onMouseLeave={() => { dragRef.current = null }}
+      >
+        {value}
+      </div>
+    </td>
+  )
+}
+
 // ─── CheckboxCell ─────────────────────────────────────────────────────────────
 
 interface CheckboxCellProps {
@@ -485,12 +537,13 @@ interface CheckboxCellProps {
   checked:   boolean
   active:    boolean
   rowActive: boolean
+  normalBg?: string
   onToggle:  () => void
 }
 
 
-function CheckboxCell({ col, checked, active, rowActive, onToggle }: CheckboxCellProps) {
-  const bg = active ? BG_CELL_ACTIVE : rowActive ? BG_ROW_ACTIVE : '#fff'
+function CheckboxCell({ col, checked, active, rowActive, normalBg, onToggle }: CheckboxCellProps) {
+  const bg = active ? BG_CELL_ACTIVE : rowActive ? BG_ROW_ACTIVE : (normalBg ?? '#fff')
   return (
     <td style={{
       ...stickyBase(col, bg),
@@ -531,8 +584,10 @@ export default function OrderProductionPage() {
   const [materials,    setMaterials]    = useState<Material[]>([])
   const [orderId,      setOrderId]      = useState<number | null>(null)
   const [partPaths,    setPartPaths]    = useState<Map<number, PartPaths>>(new Map())
+  const [detailPartId, setDetailPartId] = useState<number | null>(null)
   const [newRow,       setNewRow]       = useState({ numer_detalu: '', nazwa_detalu: '', ilosc: '1', termin_wyk: '' })
   const [newRowSaving, setNewRowSaving] = useState(false)
+  const [d101PhaseId,  setD101PhaseId]  = useState<number | null>(null)
   const [sortCol,       setSortCol]       = useState<string | null>(null)
   const [sortDir,       setSortDir]       = useState<'asc' | 'desc' | null>(null)
   const [colFilters,    setColFilters]    = useState<Record<string, string>>({})
@@ -573,6 +628,11 @@ export default function OrderProductionPage() {
   const [loadingFiles,   setLoadingFiles]   = useState(false)
   const [fileMsg,        setFileMsg]        = useState<{ text: string; ok: boolean } | null>(null)
 
+  const [cancelOrderConfirm, setCancelOrderConfirm] = useState(false)
+  const [cancellingOrder,    setCancellingOrder]    = useState(false)
+  const [deleteOrderConfirm, setDeleteOrderConfirm] = useState(false)
+  const [deletingOrder,      setDeletingOrder]      = useState(false)
+
   // Modal "Gotowe do produkcji"
   const [readyModal, setReadyModal] = useState<{
     running:      boolean
@@ -606,10 +666,11 @@ export default function OrderProductionPage() {
     if (showFilterRow) setTimeout(() => filterInputRef.current?.focus(), 0)
   }, [showFilterRow, filterCol])
 
-  /** Synchronizuje etap detalu: ≥1 czas operacji → D3, inaczej → D2 */
+  /** Synchronizuje etap detalu: ≥1 czas operacji → D3, inaczej → D2 (pomija D101) */
   const syncPhase = useCallback((partId: number) => {
     setRows(prev => prev.map(r => {
       if (r.id !== partId) return r
+      if (d101PhaseId !== null && r.phase_id === d101PhaseId) return r
       const rec     = r as unknown as Record<string, string>
       const OPS     = ['ploter','fkg','fko','tok','tokcnc','fcnc','fcnc_robo']
       const hasTime = OPS.some(k => !!rec[k])
@@ -617,7 +678,7 @@ export default function OrderProductionPage() {
       if (!hasTime && r.phase_id !== null && r.phase_id >= 11)  return { ...r, phase_id: 10 }
       return r
     }))
-  }, [])
+  }, [d101PhaseId])
 
   // ── Skalowanie kolumn (jak w OrderDetailPage) ─────────────────────────────
   const [contW, setContW] = useState(0)
@@ -650,10 +711,13 @@ export default function OrderProductionPage() {
     return acc
   }, [])
 
-  // ── Załaduj kooperacje i materiały (raz) ─────────────────────────────────
+  // ── Załaduj kooperacje, materiały i fazy (raz) ───────────────────────────
   useEffect(() => {
     cooperationsApi.getAll().then(setCooperations).catch(console.error)
     materialsApi.getAll().then(setMaterials).catch(console.error)
+    phasesApi.getByType('part').then(phases => {
+      setD101PhaseId(phases.find(p => p.name === 'D101')?.id ?? null)
+    }).catch(console.error)
   }, [])
 
   // ── Load ──────────────────────────────────────────────────────────────────
@@ -708,10 +772,9 @@ export default function OrderProductionPage() {
 
           partsApi.getPaths(partIds).then(paths => {
             setPartPaths(new Map(paths.map(p => [p.part_id, p])))
-            const firstFile = paths.flatMap(p => [p.PDF_path, p.DWG_path, p.STP_path]).find(Boolean)
-            if (firstFile) {
-              const dir = firstFile.replace(/[/\\][^/\\]+$/, '')
-              setSelectedFolder(dir)
+            const firstPdf = paths.map(p => p.PDF_path).find(Boolean)
+            if (firstPdf) {
+              setSelectedFolder(firstPdf.replace(/[/\\][^/\\]+$/, ''))
             }
           }).catch(console.error)
         })
@@ -742,14 +805,62 @@ export default function OrderProductionPage() {
   const updateCell = useCallback((rowId: number, key: string, val: string) =>
     setRows(prev => prev.map(row => row.id === rowId ? { ...row, [key]: val } : row)), [])
 
-  const toggleCheckbox = useCallback((ri: number, key: 'handlowka') => {
+  const toggleCheckbox = useCallback((ri: number, key: 'handlowka' | 'program') => {
     const rowId  = filteredRows[ri].id
-    const wasOff = !filteredRows[ri][key]
-    setRows(prev => prev.map(row => row.id === rowId ? { ...row, [key]: !row[key] } : row))
+    const wasOff = !(filteredRows[ri][key] as boolean)
+    setRows(prev => prev.map(row => row.id === rowId ? { ...row, [key]: !row[key as keyof Row] } : row))
     setActive({ r: ri, c: COLS.findIndex(c => c.key === key) })
-    if (wasOff) commercialApi.create(rowId).catch(console.error)
-    else        commercialApi.delete(rowId).catch(console.error)
+    if (key === 'handlowka') {
+      if (wasOff) commercialApi.create(rowId).catch(console.error)
+      else        commercialApi.delete(rowId).catch(console.error)
+    } else {
+      partsApi.updateProgram(rowId, wasOff).catch(console.error)
+    }
   }, [filteredRows])
+
+  const toggleWycofane = useCallback((ri: number) => {
+    const row = filteredRows[ri]
+    if (!d101PhaseId) return
+    const isWycofane = row.phase_id === d101PhaseId
+    if (isWycofane) {
+      const rec = row as unknown as Record<string, string>
+      const hasTime = SUM_KEYS.some(k => !!rec[k])
+      const restoreId = hasTime ? 11 : 10
+      setRows(prev => prev.map(r => r.id === row.id ? { ...r, phase_id: restoreId } : r))
+      partsApi.updatePhase(row.id, restoreId).catch(console.error)
+    } else {
+      // Wycofaj: ustaw D101 i wyczyść czasy, materiał, kooperacje
+      setRows(prev => prev.map(r => {
+        if (r.id !== row.id) return r
+        return {
+          ...r,
+          phase_id: d101PhaseId,
+          ploter: '', ploter_seq: '',
+          fkg:    '', fkg_seq:    '',
+          fko:    '', fko_seq:    '',
+          tok:    '', tok_seq:    '',
+          tokcnc: '', tokcnc_seq: '',
+          fcnc:   '', fcnc_seq:   '',
+          fcnc_robo: '', fcnc_robo_seq: '',
+          kop1: '', kop2: '', kop3: '',
+          material: '',
+          suma_czasu: '',
+        }
+      }))
+      partsApi.updatePhase(row.id, d101PhaseId).catch(console.error)
+      Object.entries(OPERATION_MAP).forEach(([, opId]) => {
+        operationLogsApi.save({
+          part_id: row.id, operation_id: opId,
+          time_estimated: null, operation_order: null, phase_id: null,
+        }).catch(console.error)
+      })
+      formLogApi.saveMaterialEst(row.id, null).catch(console.error)
+      ;[1, 2, 3].forEach(slot =>
+        cooperationLogApi.save({ part_id: row.id, cooperation_id: null, slot }).catch(console.error)
+      )
+    }
+    setActive({ r: ri, c: COLS.findIndex(c => c.key === 'wycofane') })
+  }, [filteredRows, d101PhaseId])
 
   const openPrzerobkaModal = useCallback((ri: number) => {
     const fRow = filteredRows[ri]
@@ -767,7 +878,7 @@ export default function OrderProductionPage() {
   }, [filteredRows.length])
 
   const startEditing = useCallback((r: number, c: number) => {
-    if (COLS[c].readOnly || COLS[c].checkbox) return
+    if (COLS[c].readOnly || COLS[c].checkbox || COLS[c].key === 'wycofane' || COLS[c].key === 'przerobka') return
     setActive({ r, c }); setEditing({ r, c })
   }, [])
 
@@ -811,11 +922,24 @@ export default function OrderProductionPage() {
       return
     }
 
+    if (col.key === 'numer_detalu' && (e.key === ' ' || e.key === 'Enter')) {
+      e.preventDefault()
+      const row = filteredRows[r]
+      const pdfPath = partPaths.get(row.id)?.PDF_path
+      const url = pdfPath
+        ? `/api/file?path=${encodeURIComponent(pdfPath)}`
+        : `/api/parts/${row.id}/pdf`
+      window.open(url, '_blank')
+      return
+    }
     if (col.key === 'przerobka' && (e.key === ' ' || e.key === 'Enter')) {
       e.preventDefault(); openPrzerobkaModal(r); return
     }
+    if (col.key === 'wycofane' && (e.key === ' ' || e.key === 'Enter')) {
+      e.preventDefault(); toggleWycofane(r); return
+    }
     if (col.checkbox && (e.key === ' ' || e.key === 'Enter')) {
-      e.preventDefault(); toggleCheckbox(r, col.key as 'handlowka'); return
+      e.preventDefault(); toggleCheckbox(r, col.key as 'handlowka' | 'program'); return
     }
     switch (e.key) {
       case 'ArrowRight': e.preventDefault(); moveTo(r, c + 1); break
@@ -825,14 +949,15 @@ export default function OrderProductionPage() {
       case 'Tab':        e.preventDefault(); moveTo(r, e.shiftKey ? c - 1 : c + 1); break
       case 'Enter': case 'F2': e.preventDefault(); startEditing(r, c); break
       case 'Delete': case 'Backspace':
-        if (!col.readOnly && !col.checkbox) {
+        if (!col.readOnly && !col.checkbox && col.key !== 'przerobka' && col.key !== 'wycofane') {
           e.preventDefault()
           if (col.group === 'operacje') {
+            updateCell(activeRow.id, col.key, '')
             updateCell(activeRow.id, col.key + '_seq', '')
             operationLogsApi.save({
               part_id:         activeRow.id,
               operation_id:    OPERATION_MAP[col.key],
-              time_estimated:  activeRowRec[col.key] ? parseFloat(activeRowRec[col.key]) : null,
+              time_estimated:  null,
               operation_order: null,
               phase_id:        null,
             }).catch(console.error)
@@ -847,7 +972,7 @@ export default function OrderProductionPage() {
       default:
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !col.readOnly && !col.checkbox) startEditing(r, c)
     }
-  }, [active, cooperations, editing, filteredRows, moveTo, openPrzerobkaModal, startEditing, syncPhase, toggleCheckbox, updateCell])
+  }, [active, cooperations, editing, filteredRows, moveTo, openPrzerobkaModal, partPaths, startEditing, syncPhase, toggleCheckbox, toggleWycofane, updateCell])
 
   // ── Zamknij modal (bez zmiany stanu detalu) ───────────────────────────────
   const closeModal = () => {
@@ -914,8 +1039,9 @@ export default function OrderProductionPage() {
 
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
+    <>
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: BG_PAGE, overflow: 'hidden' }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } } [data-drag-scroll]::-webkit-scrollbar { display: none }`}</style>
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div style={{
@@ -935,6 +1061,11 @@ export default function OrderProductionPage() {
         <div style={{ position: 'absolute', left: 0, right: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', pointerEvents: 'none' }}>
           <span style={{ fontSize: 14, color: '#6b7280', fontWeight: 400 }}>Numer Zamówienia: </span>
           <strong style={{ fontSize: 16, color: '#1d4ed8', fontWeight: 700, marginLeft: 6 }}>{decoded}</strong>
+          {rows[0]?.termin_wyk && (
+            <span style={{ fontSize: 14, color: '#6b7280', marginLeft: 16 }}>
+              Termin: <strong style={{ color: '#0f172a', fontWeight: 700 }}>{rows[0].termin_wyk}</strong>
+            </span>
+          )}
         </div>
 
         {/* Logo */}
@@ -1076,7 +1207,9 @@ export default function OrderProductionPage() {
 
               <tbody>
                 {filteredRows.map((row, ri) => {
-                  const isRowActive = active?.r === ri
+                  const isRowActive  = active?.r === ri
+                  const isWycofane   = d101PhaseId !== null && row.phase_id === d101PhaseId
+                  const NORMAL_BG    = isWycofane ? '#e5e7eb' : '#fff'
                   return (
                     <tr key={row.id}>
                       {COLS.map((col, ci) => {
@@ -1084,7 +1217,7 @@ export default function OrderProductionPage() {
                         const isEditing = editing?.r === ri && editing?.c === ci
 
                         if (col.key === 'lp') {
-                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : '#fff'
+                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : NORMAL_BG
                           return (
                             <td key={col.key} style={{
                               ...stickyBase(col, bg),
@@ -1106,7 +1239,7 @@ export default function OrderProductionPage() {
                           )
                         }
                         if (col.key === 'numer_detalu') {
-                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : '#fff'
+                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : NORMAL_BG
                           return (
                             <td key={col.key} style={{
                               ...stickyBase(col, bg),
@@ -1134,8 +1267,25 @@ export default function OrderProductionPage() {
                             </td>
                           )
                         }
+                        if (col.key === 'nazwa_detalu') {
+                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : NORMAL_BG
+                          return (
+                            <td key={col.key} style={{
+                              ...stickyBase(col, bg),
+                              height: ROW_H, padding: 0,
+                              borderRight: BORDER, borderBottom: BORDER, borderTop: 'none', borderLeft: 'none',
+                              outline: isActive ? `2px solid ${ACTIVE_RING}` : 'none',
+                              outlineOffset: -2, boxSizing: 'border-box', whiteSpace: 'nowrap', overflow: 'hidden',
+                              cursor: 'pointer',
+                            }} onClick={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus(); setDetailPartId(row.id) }}>
+                              <div style={{ padding: '0 6px', height: ROW_H, display: 'flex', alignItems: 'center', fontSize: 13, color: '#0f172a' }}>
+                                {row.nazwa_detalu}
+                              </div>
+                            </td>
+                          )
+                        }
                         if (col.key === 'przerobka') {
-                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : '#fff'
+                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : NORMAL_BG
                           return (
                             <td key={col.key} style={{
                               height: ROW_H, padding: 0, cursor: 'pointer',
@@ -1156,12 +1306,35 @@ export default function OrderProductionPage() {
                             </td>
                           )
                         }
+                        if (col.key === 'wycofane') {
+                          const bg = isActive ? BG_CELL_ACTIVE : isRowActive ? BG_ROW_ACTIVE : NORMAL_BG
+                          return (
+                            <td key={col.key} style={{
+                              height: ROW_H, padding: 0, cursor: 'pointer',
+                              borderRight: BORDER, borderBottom: BORDER, borderTop: 'none', borderLeft: 'none',
+                              background: bg, outline: isActive ? `2px solid ${ACTIVE_RING}` : 'none',
+                              outlineOffset: -2, boxSizing: 'border-box',
+                            }} onClick={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus(); toggleWycofane(ri) }}>
+                              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: ROW_H }}>
+                                <div style={{
+                                  width: 16, height: 16,
+                                  border: `1.5px solid ${isWycofane ? '#9ca3af' : '#d1d5db'}`,
+                                  borderRadius: 3, background: isWycofane ? '#9ca3af' : 'white',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                  {isWycofane && <span style={{ color: 'white', fontSize: 10, fontWeight: 800, lineHeight: 1 }}>✓</span>}
+                                </div>
+                              </div>
+                            </td>
+                          )
+                        }
                         if (col.checkbox) {
                           return (
                             <CheckboxCell key={col.key} col={col}
-                              checked={row[col.key as 'handlowka']}
+                              checked={row[col.key as 'handlowka' | 'program']}
                               active={isActive} rowActive={isRowActive}
-                              onToggle={() => toggleCheckbox(ri, col.key as 'handlowka')}
+                              normalBg={NORMAL_BG}
+                              onToggle={() => toggleCheckbox(ri, col.key as 'handlowka' | 'program')}
                             />
                           )
                         }
@@ -1190,16 +1363,20 @@ export default function OrderProductionPage() {
                               seqVal={rowRec[col.key + '_seq'] ?? ''}
                               usedSeqs={usedSeqs}
                               active={isActive} rowActive={isRowActive} editing={isEditing}
+                              normalBg={NORMAL_BG}
                               onActivate={() => {
                                 setActive({ r: ri, c: ci }); containerRef.current?.focus()
-                                if (!rowRec[col.key + '_seq']) {
-                                  const next = OP_SEQ_OPTIONS.find(n => !usedSeqs.has(n)) ?? ''
-                                  if (next) { updateCell(row.id, col.key + '_seq', next); saveLog(rowRec[col.key], next) }
-                                }
                               }}
                               onAfterSelect={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
                               onStartEdit={() => startEditing(ri, ci)}
-                              onUpdateTime={v => { updateCell(row.id, col.key, v); saveLog(v, rowRec[col.key + '_seq']) }}
+                              onUpdateTime={v => {
+                                let seq = rowRec[col.key + '_seq'] ?? ''
+                                if (v && !seq) {
+                                  const next = OP_SEQ_OPTIONS.find(n => !usedSeqs.has(n)) ?? ''
+                                  if (next) { seq = next; updateCell(row.id, col.key + '_seq', next) }
+                                }
+                                updateCell(row.id, col.key, v); saveLog(v, seq)
+                              }}
                               onUpdateSeq={v => { updateCell(row.id, col.key + '_seq', v); saveLog(rowRec[col.key], v) }}
                               onCommitAndMove={(dr, dc, _v, ae) => {
                                 setEditing(null)
@@ -1227,6 +1404,7 @@ export default function OrderProductionPage() {
                               invalidName={invalidCoopName}
                               slot={KOP_SLOT[col.key]}
                               active={isActive} rowActive={isRowActive}
+                              normalBg={NORMAL_BG}
                               onActivate={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
                               onAfterSelect={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
                               onUpdate={id => {
@@ -1243,7 +1421,7 @@ export default function OrderProductionPage() {
                         if (col.key === 'material') {
                           const matId     = row.material
                           const invalidMat = !!matId && !filteredMaterials.some(m => String(m.id) === matId)
-                          const bg = isActive ? GROUP_BG_ACTIVE.dodatkowe : isRowActive ? '#f0fdfa' : '#fff'
+                          const bg = isActive ? GROUP_BG_ACTIVE.dodatkowe : isRowActive ? '#f0fdfa' : NORMAL_BG
                           return (
                             <td key={col.key} style={{
                               minWidth: colWidths[ci], maxWidth: colWidths[ci], width: colWidths[ci],
@@ -1298,10 +1476,20 @@ export default function OrderProductionPage() {
                             </td>
                           )
                         }
+                        if (col.key === 'comment') {
+                          return (
+                            <DragScrollCell key={col.key}
+                              value={getCellValue(col, row, ri + 1)}
+                              active={isActive} rowActive={isRowActive} normalBg={NORMAL_BG}
+                              onActivate={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
+                            />
+                          )
+                        }
                         return (
                           <Cell key={col.key} col={col}
                             value={getCellValue(col, row, ri + 1)}
                             active={isActive} rowActive={isRowActive} editing={isEditing}
+                            normalBg={NORMAL_BG}
                             onActivate={() => { setActive({ r: ri, c: ci }); containerRef.current?.focus() }}
                             onStartEdit={() => startEditing(ri, ci)}
                             onCommitAndMove={(dr, dc, v, ae) => {
@@ -1327,113 +1515,6 @@ export default function OrderProductionPage() {
                   </tr>
                 )}
 
-                {/* ── Wiersz dodawania nowego detalu ── */}
-                {orderId != null && (() => {
-                  const NR_STYLE: React.CSSProperties = {
-                    height: ROW_H, padding: '0 6px', fontSize: 12,
-                    border: 'none', outline: 'none', width: '100%',
-                    background: 'transparent', boxSizing: 'border-box',
-                  }
-                  const submitNewRow = async () => {
-                    const { numer_detalu, nazwa_detalu, ilosc, termin_wyk } = newRow
-                    if (!numer_detalu.trim() || !nazwa_detalu.trim() || newRowSaving) return
-                    setNewRowSaving(true)
-                    try {
-                      const qty = parseInt(ilosc, 10) || 1
-                      let deadlineAt: string | null = null
-                      if (termin_wyk) {
-                        const [d, m, y] = termin_wyk.split('.')
-                        if (d && m && y) deadlineAt = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
-                        else deadlineAt = termin_wyk
-                      }
-                      const { id: newId } = await partsApi.create({
-                        order_id:      orderId!,
-                        part_number:   numer_detalu.trim(),
-                        name:          nazwa_detalu.trim(),
-                        quantity_right: qty,
-                        deadline_at:   deadlineAt,
-                      })
-                      const newPart = await partsApi.getById(newId)
-                      setRows(prev => [...prev, partToRow(newPart as unknown as Part, decoded, deadlineAt ? new Date(deadlineAt).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '')])
-                      setNewRow({ numer_detalu: '', nazwa_detalu: '', ilosc: '1', termin_wyk: '' })
-                    } catch (e) { console.error('create part error:', e) }
-                    finally { setNewRowSaving(false) }
-                  }
-                  const tdBase: React.CSSProperties = {
-                    height: ROW_H, borderRight: BORDER, borderBottom: BORDER,
-                    borderTop: 'none', borderLeft: 'none', background: '#f0fdf4',
-                    padding: 0, boxSizing: 'border-box',
-                  }
-                  return (
-                    <tr style={{ background: '#f0fdf4' }}>
-                      {COLS.map(col => {
-                        if (col.key === 'lp') return (
-                          <td key="lp" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4'), textAlign: 'center', fontSize: 16, color: '#16a34a', fontWeight: 700 }}>+</td>
-                        )
-                        if (col.key === 'numer_zlecenia') return (
-                          <td key="numer_zlecenia" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }}>
-                            <div style={{ ...NR_STYLE, display: 'flex', alignItems: 'center', color: '#6b7280', fontStyle: 'italic' }}>{decoded}</div>
-                          </td>
-                        )
-                        if (col.key === 'termin_wyk') return (
-                          <td key="termin_wyk" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }} onClick={e => e.stopPropagation()}>
-                            <input
-                              placeholder="DD.MM.RRRR"
-                              value={newRow.termin_wyk}
-                              onChange={e => setNewRow(r => ({ ...r, termin_wyk: e.target.value }))}
-                              onClick={e => e.stopPropagation()}
-                              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') (e.currentTarget.closest('tr')?.querySelector('[data-field="nr"]') as HTMLInputElement)?.focus() }}
-                              style={{ ...NR_STYLE, color: '#374151' }}
-                            />
-                          </td>
-                        )
-                        if (col.key === 'numer_detalu') return (
-                          <td key="numer_detalu" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }} onClick={e => e.stopPropagation()}>
-                            <input
-                              data-field="nr"
-                              placeholder="Nr detalu *"
-                              value={newRow.numer_detalu}
-                              onChange={e => setNewRow(r => ({ ...r, numer_detalu: e.target.value }))}
-                              onClick={e => e.stopPropagation()}
-                              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') (e.currentTarget.closest('tr')?.querySelector('[data-field="nazwa"]') as HTMLInputElement)?.focus() }}
-                              style={{ ...NR_STYLE, fontWeight: 600 }}
-                            />
-                          </td>
-                        )
-                        if (col.key === 'nazwa_detalu') return (
-                          <td key="nazwa_detalu" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }} onClick={e => e.stopPropagation()}>
-                            <input
-                              data-field="nazwa"
-                              placeholder="Nazwa *"
-                              value={newRow.nazwa_detalu}
-                              onChange={e => setNewRow(r => ({ ...r, nazwa_detalu: e.target.value }))}
-                              onClick={e => e.stopPropagation()}
-                              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') (e.currentTarget.closest('tr')?.querySelector('[data-field="ilosc"]') as HTMLInputElement)?.focus() }}
-                              style={{ ...NR_STYLE }}
-                            />
-                          </td>
-                        )
-                        if (col.key === 'ilosc') return (
-                          <td key="ilosc" style={{ ...tdBase, ...stickyBase(col, '#f0fdf4') }} onClick={e => e.stopPropagation()}>
-                            <input
-                              data-field="ilosc"
-                              type="number"
-                              min={1}
-                              value={newRow.ilosc}
-                              onChange={e => setNewRow(r => ({ ...r, ilosc: e.target.value }))}
-                              onClick={e => e.stopPropagation()}
-                              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); submitNewRow() } }}
-                              onBlur={submitNewRow}
-                              disabled={newRowSaving}
-                              style={{ ...NR_STYLE, textAlign: 'center' }}
-                            />
-                          </td>
-                        )
-                        return <td key={col.key} style={tdBase} />
-                      })}
-                    </tr>
-                  )
-                })()}
               </tbody>
             </table>
 
@@ -1467,34 +1548,18 @@ export default function OrderProductionPage() {
                   </span>
                 </div>
 
-                {/* Prawa strona — przyciski + ścieżka */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'flex-end' }}>
-                  <button
-                    onClick={async () => {
-                      const r = await dialogApi.selectFolder().catch(() => ({ path: null }))
-                      if (r.path) {
-                        setSelectedFolder(r.path)
-                        setFileMsg(null)
-                      }
-                    }}
+                {/* Prawa strona — input ścieżki + przyciski */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'flex-end' }}>
+                  <input
+                    value={selectedFolder ?? ''}
+                    onChange={e => { setSelectedFolder(e.target.value.trim() || null); setFileMsg(null) }}
+                    placeholder="Wklej ścieżkę folderu, np. \\serwer\rysunki\zamówienie"
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      border: selectedFolder ? '1px solid #2563eb' : '1px solid #fca5a5',
-                      borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600,
-                      background: selectedFolder ? '#eff6ff' : '#fff',
-                      color: selectedFolder ? '#1d4ed8' : '#b91c1c',
-                      cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                      flex: '0 0 auto', width: '40%', fontSize: 11, padding: '4px 8px', borderRadius: 5,
+                      border: selectedFolder ? '1px solid #93c5fd' : '1px solid #fca5a5',
+                      background: '#fff', color: '#0f172a', outline: 'none',
                     }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
-                    </svg>
-                    {selectedFolder
-                      ? selectedFolder.split(/[\\/]/).filter(Boolean).at(-1) ?? selectedFolder
-                      : 'Wybierz Folder'
-                    }
-                  </button>
-
+                  />
                   <button
                     disabled={!selectedFolder || loadingFiles}
                     onClick={async () => {
@@ -1596,25 +1661,42 @@ export default function OrderProductionPage() {
           )
         })()}
 
-        {/* ── Footer na dole ────────────────────────────────────────────── */}
-        <div style={{
-          flexShrink: 0, background: '#fff', borderTop: BORDER,
-          padding: '10px 20px',
-          display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 16,
-        }}>
+      </div>{/* koniec outer wrapper */}
+
+      {/* ── Footer na dole ────────────────────────────────────────────── */}
+      <div style={{
+        flexShrink: 0, background: '#fff', borderTop: BORDER,
+        padding: '10px 20px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+      }}>
+          {/* Edytuj zamówienie */}
+          <button
+            onClick={() => navigate(`/orders/edytuj/${encodeURIComponent(decoded)}`)}
+            style={{
+              padding: '6px 16px', fontSize: 12, fontWeight: 600,
+              background: '#fff', color: '#1d4ed8', border: '1px solid #bfdbfe',
+              borderRadius: 6, cursor: 'pointer',
+            }}
+          >
+            Edytuj zamówienie
+          </button>
+
+          {/* Prawa strona — statystyki + Gotowe do produkcji */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>
             Gotowe: <strong style={{ color: '#0f172a', fontWeight: 700 }}>
-              {rows.filter(r => r.phase_id !== null && r.phase_id >= 11).length}
+              {rows.filter(r => r.phase_id !== null && r.phase_id >= 11 && r.phase_id !== (d101PhaseId ?? -1)).length}
             </strong>
             {' / '}
-            <strong style={{ color: '#0f172a', fontWeight: 700 }}>{rows.length}</strong>
+            <strong style={{ color: '#0f172a', fontWeight: 700 }}>{rows.filter(r => r.phase_id !== (d101PhaseId ?? -1)).length}</strong>
           </span>
           <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>
             Total czas: <strong style={{ color: '#0f172a', fontWeight: 700 }}>{totalCzas || 0}</strong>
           </span>
           {(() => {
-            const doneCount  = rows.filter(r => r.phase_id !== null && r.phase_id >= 11).length
-            const allDone    = rows.length > 0 && doneCount === rows.length
+            const activeParts = rows.filter(r => r.phase_id !== (d101PhaseId ?? -1))
+            const doneCount   = activeParts.filter(r => r.phase_id !== null && r.phase_id >= 11).length
+            const allDone     = activeParts.length > 0 && doneCount === activeParts.length
             return (
               <button
                 disabled={!allDone}
@@ -1656,7 +1738,7 @@ export default function OrderProductionPage() {
               </button>
             )
           })()}
-        </div>
+          </div>{/* koniec prawej strony */}
       </div>
 
       {/* ── Modal: Gotowe do produkcji ───────────────────────────────────── */}
@@ -1893,5 +1975,23 @@ export default function OrderProductionPage() {
       )}
 
     </div>
+
+    {detailPartId && (
+      <div style={{ position: 'fixed', top: 0, left: 56, right: 0, bottom: 0, zIndex: 300, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <PartDetailContent
+          part_id={detailPartId}
+          onClose={() => setDetailPartId(null)}
+          onPathSaved={(partId, pathKey, val) => {
+            setPartPaths(prev => {
+              const next = new Map(prev)
+              const existing = next.get(partId) ?? { part_id: partId, PDF_path: null, DWG_path: null, STP_path: null }
+              next.set(partId, { ...existing, [pathKey]: val })
+              return next
+            })
+          }}
+        />
+      </div>
+    )}
+    </>
   )
 }

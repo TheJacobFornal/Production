@@ -13,6 +13,7 @@ import HandlowkaPage from './pages/HandlowkaPage'
 import KooperacjaPage from './pages/KooperacjaPage'
 import ProductionCardPage from './pages/ProductionCardPage'
 import SettingsPage from './pages/SettingsPage'
+import NewOrderPage from './pages/NewOrderPage'
 
 // ─── Layout ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,8 @@ function AppRoutes() {
         <Route path="/"                                          element={<Navigate to="/home" replace />} />
         <Route path="/home"                                      element={<HomePage />} />
         <Route path="/orders"                                    element={<OrdersPage />} />
+        <Route path="/orders/nowe/:orderNumber"                  element={<NewOrderPage />} />
+        <Route path="/orders/edytuj/:orderNumber"               element={<NewOrderPage />} />
         <Route path="/orders/:orderNumber"                       element={<OrderProductionPage />} />
         <Route path="/orders/:orderNumber/planowanie"            element={<ProductionPlanningPage />} />
         <Route path="/karta-detalu/:numer_detalu"                element={<PartDetailPage />} />

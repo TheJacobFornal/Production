@@ -101,9 +101,10 @@ export default function ProductionCardPage() {
   })
   if (coopNames.length > 0) {
     allRows.push({ kind: 'empty' })
-    for (const name of coopNames) {
+    coopNames.forEach((name, i) => {
       allRows.push({ kind: 'label', name })
-    }
+      if (i < coopNames.length - 1) allRows.push({ kind: 'empty' })
+    })
   }
   while (allRows.length < TOTAL_OP_ROWS) allRows.push({ kind: 'empty' })
 
@@ -185,25 +186,34 @@ export default function ProductionCardPage() {
               <td style={TH}>Podpis</td>
             </tr>
             {allRows.map((row, i) => (
-              <tr key={i} style={{ height: 26 }}>
-                <td style={{ ...TD, fontWeight: row.kind !== 'empty' ? 700 : 400 }}>
-                  {row.kind === 'op' ? row.entry.op.name : row.kind === 'label' ? row.name : ''}
+              <tr key={i}>
+                {/* Operacja */}
+                <td style={{ ...TD, height: 26, fontWeight: row.kind !== 'empty' ? 700 : 400, padding: row.kind === 'empty' ? 0 : '2px 5px' }}>
+                  {row.kind === 'op'    ? row.entry.op.name
+                  : row.kind === 'label' ? row.name
+                  : <InputCell />}
                 </td>
-                <td style={{ ...TD, padding: 0 }}>
-                  {row.kind !== 'empty' && (
-                    <NotesCell
-                      initialValue={row.kind === 'op' ? (row.entry.log.notes ?? '') : ''}
-                      onSave={row.kind === 'op'
-                        ? val => operationLogsApi.saveNotes(row.entry.log.part_id, row.entry.log.operation_id, val || null).catch(console.error)
-                        : () => {}}
-                    />
-                  )}
+                {/* Uwagi */}
+                <td style={{ ...TD, height: 26, padding: 0 }}>
+                  <NotesCell
+                    initialValue={row.kind === 'op' ? (row.entry.log.notes ?? '') : ''}
+                    onSave={row.kind === 'op'
+                      ? val => operationLogsApi.saveNotes(row.entry.log.part_id, row.entry.log.operation_id, val || null).catch(console.error)
+                      : () => {}}
+                  />
                 </td>
-                <td style={TD}></td>
-                <td style={{ ...TD, textAlign: 'center' }}>{row.kind !== 'empty' ? part.quantity_right : ''}</td>
-                <td style={TD}></td>
-                <td style={{ ...TD, textAlign: 'center' }}><Checkbox /></td>
-                <td style={TD}></td>
+                {/* Data */}
+                <td style={{ ...TD, height: 26, padding: 0 }}><InputCell /></td>
+                {/* Ilość */}
+                <td style={{ ...TD, height: 26, textAlign: 'center', padding: row.kind === 'empty' ? 0 : '2px 5px' }}>
+                  {row.kind !== 'empty' ? part.quantity_right : <InputCell center />}
+                </td>
+                {/* Czas */}
+                <td style={{ ...TD, height: 26, padding: 0 }}><InputCell /></td>
+                {/* Kontrola */}
+                <td style={{ ...TD, height: 26, textAlign: 'center' }}><Checkbox /></td>
+                {/* Podpis */}
+                <td style={{ ...TD, height: 26, padding: 0 }}><InputCell /></td>
               </tr>
             ))}
             <tr>
@@ -230,6 +240,8 @@ export default function ProductionCardPage() {
           .no-print { display: none !important; }
           body { margin: 0; }
           @page { size: A4 portrait; margin: 15px; }
+          tr { height: 26px !important; }
+          input, textarea { display: block; min-height: 18px; box-sizing: border-box; }
         }
       `}</style>
     </>
@@ -242,6 +254,24 @@ function Checkbox() {
       width: 15, height: 15, border: '1.5px solid #000',
       display: 'inline-block', verticalAlign: 'middle',
     }} />
+  )
+}
+
+function InputCell({ center }: { center?: boolean }) {
+  const [val, setVal] = useState('')
+  return (
+    <input
+      value={val}
+      onChange={e => setVal(e.target.value)}
+      style={{
+        width: '100%', boxSizing: 'border-box',
+        border: 'none', outline: 'none',
+        background: 'transparent', fontSize: 12,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        padding: '2px 5px',
+        textAlign: center ? 'center' : 'left',
+      }}
+    />
   )
 }
 
